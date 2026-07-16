@@ -1,0 +1,15 @@
+Extentos iOS SDK — Proprietary License (pre-GA)
+
+Copyright (c) 2026 Extentos. All rights reserved.
+
+Permission is granted to use this SDK (its source form and binary artifacts)
+solely to develop, test, and distribute applications that integrate with the
+Extentos platform. Redistribution of the SDK itself, in source or binary form,
+and modification of the SDK for redistribution are not permitted.
+
+THE SDK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+IN NO EVENT SHALL EXTENTOS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY
+ARISING FROM THE USE OF THE SDK.
+
+This is a pre-GA license, matching the Android artifact on Maven Central
+("Proprietary — pre-GA"), and will be revisited at general availability.

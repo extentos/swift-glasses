@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+.DS_Store
+# The xcframework ships as a GitHub Release asset, never in-tree.
+Artifacts/
+*.xcframework.zip

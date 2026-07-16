@@ -20,6 +20,13 @@ dependencies: [
 ],
 ```
 
+> **Pre-release tags** (e.g. `1.7.0-rc1`) are excluded from `from:` version
+> ranges by SwiftPM's semver rules — pin them exactly instead:
+> `.package(url: "…/swift-glasses", exact: "1.7.0-rc1")` (xcodegen:
+> `exactVersion: 1.7.0-rc1`). If `from:` reports "no versions matching",
+> check the [releases page](https://github.com/extentos/swift-glasses/releases)
+> for whether the latest tag is a pre-release.
+
 Products: `GlassesCore` (the SDK), `GlassesUI` (drop-in connection page),
 `GlassesDebug` (debug console — debug builds only), `GlassesLifecycle`,
 `GlassesTesting`.

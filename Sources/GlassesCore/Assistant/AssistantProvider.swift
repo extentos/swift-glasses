@@ -1,15 +1,20 @@
 import Foundation
 
-// Provider abstraction for `glasses.assistant`. v1 ships OpenAI Realtime
-// (through the Extentos managed gateway) and Mock. Provider config carries
-// model-side knobs only (model name, voice, turn detection, reasoning
-// effort); session behavior lives on `AssistantConfig`.
+// Provider abstraction for `glasses.assistant`. `openAI` is the MANAGED
+// REALTIME provider, not an OpenAI-only switch: the resolved model id picks
+// the vendor (`gpt-*` → OpenAI, `grok-*` → xAI Grok, `gemini-*` → Google
+// Gemini Live — the core carries a protocol adapter per vendor), so
+// switching vendors is a dashboard/model-id change, not a new provider
+// case. `mock` is the deterministic in-process test provider. Provider
+// config carries model-side knobs only (model name, voice, turn detection,
+// reasoning effort); session behavior lives on `AssistantConfig`.
 //
 // Mirrors `android-library/.../assistant/AssistantProvider.kt`.
 
 public enum AssistantProvider: Sendable {
 
-    /// OpenAI Realtime through the Extentos managed gateway.
+    /// The managed realtime provider, through the Extentos gateway — the
+    /// resolved model id picks the vendor (see the header note).
     ///
     /// `model` / `voice` are OPTIONAL: `nil` (the default) means "use the
     /// value configured for this project in the Extentos dashboard's Agent

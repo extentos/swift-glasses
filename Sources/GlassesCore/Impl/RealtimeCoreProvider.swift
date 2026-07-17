@@ -1,11 +1,13 @@
 import Foundation
 import os
 
-// OpenAI Realtime provider, **thin shell** over the Rust core
-// (core/extentos-core/src/realtime). The whole vendor-agnostic runtime — WS
-// protocol, session.update, the inbound demux, barge-in, the response-create
-// gate, history + compaction, audio codec/framing, reconnect — lives in
-// `RealtimeVoiceCore`. This file keeps only the platform-bound seams:
+// Managed realtime provider, **thin shell** over the Rust core
+// (core/extentos-core/src/realtime). The resolved model id picks the vendor
+// (`gpt-*` → OpenAI, `grok-*` → xAI Grok, `gemini-*` → Google Gemini Live —
+// the core carries a protocol adapter per vendor). The whole vendor-agnostic
+// runtime — WS protocol, session.update, the inbound demux, barge-in, the
+// response-create gate, history + compaction, audio codec/framing, reconnect
+// — lives in `RealtimeVoiceCore`. This file keeps only the platform-bound seams:
 //   - the URLSession WebSocket (the core's `WebSocketBridge`),
 //   - the audio device (mic stream → `onMicAudio`; playback via the transport),
 //   - running the customer's tool bodies,
@@ -18,8 +20,8 @@ import os
 
 // ── Gateway backing ──────────────────────────────────────────────────────
 
-/// How the assistant runtime reaches OpenAI — the credential + endpoints for
-/// a session. One path: the Extentos managed GATEWAY on Extentos's key,
+/// How the assistant runtime reaches the vendor realtime API — the
+/// credential + endpoints for a session. One path: the Extentos managed GATEWAY on Extentos's key,
 /// authed per-call. URLs + header vocabulary are core-owned
 /// (realtime/gateway.rs); this struct just binds the token source.
 struct AssistantBacking: Sendable {
@@ -264,6 +266,10 @@ final class RealtimeCoreProvider: AssistantProviderRuntime, @unchecked Sendable 
             return
         }
         core.includeImage(imageUrl: imageUrl, prompt: prompt)
+    }
+
+    func sendVideoFrame(_ frame: Data, mimeType: String) async {
+        core.sendVideoFrame(frame: frame, mimeType: mimeType)
     }
 
     func injectSystemContext(_ text: String) { core.injectSystemContext(text: text) }
@@ -600,8 +606,23 @@ private final class UrlSessionWsBridge: NSObject, WebSocketBridge, URLSessionWeb
             guard let self else { return }
             switch result {
             case .success(let message):
-                if case .string(let text) = message {
+                switch message {
+                case .string(let text):
                     self.core?.onText(text: text)
+                case .data(let data):
+                    // Gemini Live sends EVERY server message as a BINARY WS
+                    // frame carrying UTF-8 JSON (verified live 2026-07-17 —
+                    // the Node probes masked it because `ws` hands a Buffer
+                    // either way). OpenAI/Grok never send binary, so decoding
+                    // to the same onText path is provider-safe. Without this
+                    // arm the whole Gemini handshake dies: setupComplete
+                    // arrives binary, gets dropped here, and connect() times
+                    // out on ready.
+                    if let text = String(data: data, encoding: .utf8) {
+                        self.core?.onText(text: text)
+                    }
+                @unknown default:
+                    break
                 }
                 self.receiveLoop(t)
             case .failure:

@@ -2312,7 +2312,9 @@ public protocol RealtimeVoiceCoreProtocol : AnyObject {
     func conversationHistory(limit: UInt32)  -> [RealtimeTurn]
     
     /**
-     * Sleep: close the WS. History is preserved for the next wake.
+     * Sleep: close the WS. History is preserved for the next wake; protocol-
+     * specific session state that must NOT survive a sleep (Gemini's
+     * resumption handle) is dropped so the next wake is a fresh session.
      */
     func disconnect() 
     
@@ -2333,7 +2335,8 @@ public protocol RealtimeVoiceCoreProtocol : AnyObject {
     func onFailure() 
     
     /**
-     * A mic chunk from the audio device — encode it to an `input_audio_buffer.append`.
+     * A mic chunk from the audio device — encode it to the protocol's audio
+     * frame (may be empty: Gemini drops pre-ready chunks).
      */
     func onMicAudio(sampleRate: Int32, pcm: Data) 
     
@@ -2359,6 +2362,13 @@ public protocol RealtimeVoiceCoreProtocol : AnyObject {
     func replaceHistory(turns: [RealtimeTurn]) 
     
     func say(text: String) 
+    
+    /**
+     * Streaming video input (Gemini Live only, per-model gated). Non-video
+     * sessions emit an `Error{kind: "video_input_unsupported"}` event instead
+     * of silently dropping the frame.
+     */
+    func sendVideoFrame(frame: Data, mimeType: String) 
     
     func setMemoryPreamble(preamble: String?) 
     
@@ -2519,7 +2529,9 @@ open func conversationHistory(limit: UInt32) -> [RealtimeTurn] {
 }
     
     /**
-     * Sleep: close the WS. History is preserved for the next wake.
+     * Sleep: close the WS. History is preserved for the next wake; protocol-
+     * specific session state that must NOT survive a sleep (Gemini's
+     * resumption handle) is dropped so the next wake is a fresh session.
      */
 open func disconnect() {try! rustCall() {
     uniffi_extentos_core_fn_method_realtimevoicecore_disconnect(self.uniffiClonePointer(),$0
@@ -2573,7 +2585,8 @@ open func onFailure() {try! rustCall() {
 }
     
     /**
-     * A mic chunk from the audio device — encode it to an `input_audio_buffer.append`.
+     * A mic chunk from the audio device — encode it to the protocol's audio
+     * frame (may be empty: Gemini drops pre-ready chunks).
      */
 open func onMicAudio(sampleRate: Int32, pcm: Data) {try! rustCall() {
     uniffi_extentos_core_fn_method_realtimevoicecore_on_mic_audio(self.uniffiClonePointer(),
@@ -2625,6 +2638,19 @@ open func replaceHistory(turns: [RealtimeTurn]) {try! rustCall() {
 open func say(text: String) {try! rustCall() {
     uniffi_extentos_core_fn_method_realtimevoicecore_say(self.uniffiClonePointer(),
         FfiConverterString.lower(text),$0
+    )
+}
+}
+    
+    /**
+     * Streaming video input (Gemini Live only, per-model gated). Non-video
+     * sessions emit an `Error{kind: "video_input_unsupported"}` event instead
+     * of silently dropping the frame.
+     */
+open func sendVideoFrame(frame: Data, mimeType: String) {try! rustCall() {
+    uniffi_extentos_core_fn_method_realtimevoicecore_send_video_frame(self.uniffiClonePointer(),
+        FfiConverterData.lower(frame),
+        FfiConverterString.lower(mimeType),$0
     )
 }
 }
@@ -16362,6 +16388,18 @@ public func assistantModelSupportsReasoning(modelId: String) -> Bool {
 })
 }
 /**
+ * Whether `model_id`'s live session accepts streaming video input
+ * (`sendVideoFrame`). Unknown models default to `false` — a dropped-and-
+ * hallucinated frame is worse than an error event.
+ */
+public func assistantModelSupportsVideo(modelId: String) -> Bool {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_assistant_model_supports_video(
+        FfiConverterString.lower(modelId),$0
+    )
+})
+}
+/**
  * Voices selectable for `model_id` — scoped to the model's provider (a Grok
  * model can't speak an OpenAI voice). Unknown models fall back to OpenAI.
  */
@@ -17112,6 +17150,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_assistant_model_supports_reasoning() != 17361) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_assistant_model_supports_video() != 56603) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_assistant_voices_for_model() != 16187) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -17493,7 +17534,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_conversation_history() != 63959) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_realtimevoicecore_disconnect() != 569) {
+    if (uniffi_extentos_core_checksum_method_realtimevoicecore_disconnect() != 20779) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_greet() != 17785) {
@@ -17514,7 +17555,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_failure() != 59343) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_mic_audio() != 60519) {
+    if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_mic_audio() != 64374) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_open() != 23400) {
@@ -17530,6 +17571,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_say() != 21840) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_realtimevoicecore_send_video_frame() != 48887) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_set_memory_preamble() != 8830) {

@@ -1,12 +1,12 @@
 import Foundation
 
 // `glasses.assistant` customer surface. End-to-end voice provider
-// abstraction: OpenAI Realtime through the Extentos MANAGED GATEWAY in v1
-// (no app-side key — dev builds reach the gateway via the simulator's
-// token, beta/prod builds attest; BYOK is dashboard-managed, swapped in
-// server-side) plus Mock for tests. The model owns wake detection, turn
-// taking, intent parsing, and confirmation speech — the customer writes
-// tool bodies.
+// abstraction: OpenAI Realtime, xAI Grok, and Google Gemini Live by model
+// id, all through the Extentos MANAGED GATEWAY (no app-side key — dev
+// builds reach the gateway via the simulator's token, beta/prod builds
+// attest; BYOK is dashboard-managed, swapped in server-side) plus Mock
+// for tests. The model owns wake detection, turn taking, intent parsing,
+// and confirmation speech — the customer writes tool bodies.
 //
 // Two registration forms (customer-can-skip-it lock):
 //   - Sugar — `start(provider:_:) { $0.tool(...) { ... } }`.
@@ -132,6 +132,61 @@ public protocol AssistantSession: Sendable {
     /// response + flushes queued audio).
     func cancelSpeak() async
 
+    /// Stream one video frame into the live conversation — the assistant
+    /// sees what the glasses see and can comment mid-dialogue.
+    ///
+    /// **Gemini Live only, and per-model gated**: today only
+    /// `gemini-3.1-flash-live-preview` ingests video. On any other model
+    /// (including every OpenAI/Grok model) the session emits
+    /// `AssistantEvent.error(kind: "video_input_unsupported")` and sends
+    /// nothing — never a silent drop.
+    ///
+    /// `jpegBytes` is one encoded image. `glasses.camera.videoFrames()`
+    /// delivers JPEG frames by default (identical on simulator and
+    /// hardware), so `frame.buffer` feeds this directly:
+    ///
+    ///     for try await frame in glasses.camera.videoFrames(
+    ///         config: VideoFrameConfig(resolution: .low, frameRate: 2)
+    ///     ) {
+    ///         // ~1 fps is plenty — tens of input tokens per frame.
+    ///         try await session.sendVideoFrame(frame.buffer)
+    ///     }
+    ///
+    /// Cost note: frames are token-billed as image input at the session's
+    /// low media resolution (on the order of tens of tokens per frame).
+    /// On real glasses, continuous camera + duplex audio is the fragile
+    /// coexistence path — prefer on-demand bursts over always-on streaming.
+    ///
+    /// Fire-and-forget. Active-only — throws `AssistantError.notReady`
+    /// in other states.
+    func sendVideoFrame(_ jpegBytes: Data, mimeType: String) async throws
+
+    /// Whether the session's RESOLVED model (code-pin or dashboard value,
+    /// fixed at `start()`) accepts streaming video input via
+    /// `sendVideoFrame(_:mimeType:)`.
+    ///
+    /// Use it to gate a video-driven tool up front so the model can tell the
+    /// user the truth instead of pretending to watch:
+    ///
+    ///     $0.tool("start_watching", description: "Stream the user's view so you can see it.") {
+    ///         guard session.modelSupportsVideoInput else {
+    ///             return .err("this model can't see video — switch the project to "
+    ///                 + "Gemini 3.1 Flash Live in the dashboard's Agent settings")
+    ///         }
+    ///         // ... start the frame loop ...
+    ///     }
+    ///
+    /// Defense in depth: even without this check, a `sendVideoFrame` on an
+    /// unsupported model never silently drops — the app gets
+    /// `AssistantEvent.error(kind: "video_input_unsupported")` and the MODEL
+    /// receives a one-time context note telling it that it cannot see, so it
+    /// answers the user honestly either way. This flag just lets your tool
+    /// fail fast with its own wording.
+    ///
+    /// Default `false` — only the real runtime session overrides it (test
+    /// fakes and the Mock provider have no video path).
+    var modelSupportsVideoInput: Bool { get }
+
     /// Snapshot of the newest `limit` buffered turns (oldest first).
     func conversationHistory(limit: Int) -> [Turn]
 
@@ -153,6 +208,16 @@ public extension AssistantSession {
 
     /// `greet()` with the core default directive.
     func greet() async throws { try await greet(nil) }
+
+    /// `sendVideoFrame(_:)` defaults the mime type to JPEG — the format
+    /// `glasses.camera.videoFrames()` delivers by default.
+    func sendVideoFrame(_ jpegBytes: Data) async throws {
+        try await sendVideoFrame(jpegBytes, mimeType: "image/jpeg")
+    }
+
+    /// Default `false` — only the real runtime session overrides it (test
+    /// fakes and the Mock provider have no video path).
+    var modelSupportsVideoInput: Bool { false }
 }
 
 /// Session lifecycle states — the canonical 8-state vocabulary, decided by

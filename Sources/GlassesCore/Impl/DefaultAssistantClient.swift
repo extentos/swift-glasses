@@ -194,6 +194,11 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
     /// code-set counterpart — dashboard-only knob).
     private var resolvedWakeSoundUrl: String?
     private var resolvedWakeSoundDisabled = false
+    /// The model the runtime was built with (code-pin ?? dashboard overlay),
+    /// fixed at start(). nil for Mock and when neither source sets one —
+    /// `modelSupportsVideoInput` reads it (Kotlin keeps the whole
+    /// resolvedConfig; iOS only needs the model).
+    private var resolvedModel: String?
     private let soundRegistry: SoundRegistry?
     private var sleepPhraseRegistrations: [any VoiceRegistration] = []
 
@@ -406,6 +411,25 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
         await (try activeRuntime()).includeImage(uri: uri, prompt: prompt)
     }
 
+    func sendVideoFrame(_ jpegBytes: Data, mimeType: String) async throws {
+        // Same Active-only precondition as includeImage(): the video stream
+        // only makes sense against a live model turn-loop. Per-model support
+        // is the CORE's decision (video_input_unsupported error event there) —
+        // this gate only guards the session lifecycle.
+        guard stateRef.current == .active else {
+            throw AssistantError.notReady
+        }
+        await runtime?.sendVideoFrame(jpegBytes, mimeType: mimeType)
+    }
+
+    var modelSupportsVideoInput: Bool {
+        // The RESOLVED model (code-pin or dashboard, fixed at start()).
+        // Mock / unset → the default model → false. Capability data is
+        // core-owned (same catalog the send_video_frame gate reads).
+        guard let model = resolvedModel else { return false }
+        return assistantModelSupportsVideo(modelId: model)
+    }
+
     func setReasoningEffort(_ effort: ReasoningEffort) async throws {
         (try activeRuntime()).setReasoningEffort(effort)
     }
@@ -533,9 +557,10 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
             // removed — Android parity). The token inside the backing is
             // resolved later, at WS open, so a not-yet-authed device still
             // constructs cleanly. Code-set values WIN over the overlay.
+            resolvedModel = model ?? overlay?.realtimeModel
             return RealtimeCoreProvider(
                 config: effectiveConfig,
-                model: model ?? overlay?.realtimeModel,
+                model: resolvedModel,
                 voice: voice ?? overlay?.voice,
                 turnDetection: turnDetection,
                 reasoningEffort: reasoningEffort,
@@ -611,6 +636,12 @@ internal protocol AssistantProviderRuntime: Sendable {
     func say(_ text: String) async
     func greet(_ prompt: String?) async
     func includeImage(uri: String, prompt: String?) async
+    /// Stream one encoded video frame into the live conversation. Gemini-
+    /// Live-only and per-model gated in the CORE (non-video sessions emit
+    /// Error(kind: "video_input_unsupported") — never a silent drop). No-op
+    /// default so providers without a realtime video path (Mock, test
+    /// fakes) stay source-compatible. Fire-and-forget.
+    func sendVideoFrame(_ frame: Data, mimeType: String) async
     func injectSystemContext(_ text: String)
     func setReasoningEffort(_ effort: ReasoningEffort)
     func setVoice(_ voice: String)
@@ -633,6 +664,7 @@ internal extension AssistantProviderRuntime {
     func say(_ text: String) async {}
     func greet(_ prompt: String?) async {}
     func includeImage(uri: String, prompt: String?) async {}
+    func sendVideoFrame(_ frame: Data, mimeType: String) async {}
     func injectSystemContext(_ text: String) {}
     func setReasoningEffort(_ effort: ReasoningEffort) {}
     func setVoice(_ voice: String) {}

@@ -125,13 +125,17 @@ public actor LocalSimTransport: GlassesTransport {
                 let targetFps = max(1, config.frameRate)
                 let interval = UInt64(1_000_000_000 / targetFps)
                 var pts: Int64 = 0
+                // C1 parity (mirrors Kotlin LocalSim's `format = config.format`):
+                // the synthetic placeholder frame reflects the requested wire
+                // format — `.raw` → uncompressed, everything else → compressed.
+                let compressed = config.codec != .raw
                 while !Task.isCancelled {
                     let frame = VideoFrame(
                         buffer: Data(),
                         width: 320,
                         height: 180,
                         presentationTimeUs: pts,
-                        isCompressed: false
+                        isCompressed: compressed
                     )
                     continuation.yield(frame)
                     pts += 1_000_000 / Int64(targetFps)

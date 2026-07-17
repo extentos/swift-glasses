@@ -224,6 +224,11 @@ public final class RealMetaTransport: GlassesTransport, @unchecked Sendable {
         bridge.videoFramesStream(config: config)
     }
 
+    /// C2 observability: report the bridge's first-armer lock (armed
+    /// resolution/fps, `nil` when unarmed). Mirrors Kotlin
+    /// `RealMetaTransport.activeStreamInfo() = bridge.activeStreamInfo()`.
+    public nonisolated func activeStreamInfo() -> ActiveStreamInfo? { bridge.activeStreamInfo() }
+
     public nonisolated func audioChunks(config: AudioChunkConfig) -> AsyncStream<AudioChunk> {
         bridge.audioChunksStream(config: config)
     }

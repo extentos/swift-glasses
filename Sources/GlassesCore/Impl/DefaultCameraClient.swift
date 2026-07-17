@@ -86,11 +86,16 @@ final class DefaultCameraClient: CameraClient, @unchecked Sendable {
         }
     }
 
+    func activeStreamInfo() -> ActiveStreamInfo? { transport.activeStreamInfo() }
+
     private func wrapVideo(_ stream: AsyncStream<VideoFrame>, config: VideoFrameConfig) -> AsyncStream<VideoFrame> {
         guard let hook = onStreamLifecycle else { return stream }
         let props: [String: JSONValue] = [
             "resolution": .string(resolutionWire(config.resolution)),
             "frameRate": .int(Int64(config.frameRate)),
+            // C1 parity: lifecycle events carry the delivered frame format
+            // ("jpeg" | "raw_yuv") so the event log matches the Kotlin side.
+            "format": .string(config.codec == .raw ? "raw_yuv" : "jpeg"),
         ]
         return StreamLifecycleWrap.wrap(stream, streamType: "video_frames", props: props, hook: hook)
     }

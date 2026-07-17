@@ -1,5 +1,7 @@
 import Foundation
 import os
+import CoreGraphics
+import ImageIO
 
 private extension Logger {
     static let transport = Logger(subsystem: "com.extentos.glasses", category: "transport")
@@ -55,6 +57,13 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
     // cap 128.
     private let framesLock = NSLock()
     private var frameContinuations: [UUID: AsyncStream<JSONValue>.Continuation] = [:]
+
+    // C2 sim parity: the sim has no DAT first-armer lock, but the app-level
+    // "what config is the live stream running at?" question must resolve
+    // identically on both substrates. Registered at videoFrames start, removed
+    // on termination. Kotlin twin: `activeVideoStreams`.
+    private let videoStreamsLock = NSLock()
+    private var activeVideoStreams: [String: ActiveStreamInfo] = [:]
 
     /// Fresh `AsyncStream<JSONValue>` of parsed inbound text frames. Each
     /// access returns an independent stream; multiple subscribers see
@@ -332,24 +341,105 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
 
     public nonisolated func videoFrames(config: VideoFrameConfig) -> AsyncStream<VideoFrame> {
         AsyncStream { continuation in
+            // C1 sim parity: the browser's frame source is JPEG. `.raw` decodes
+            // it to planar I420 (same BT.601 coefficients as the Kotlin sim, so
+            // raw bytes match byte-for-byte across platforms) — the CONTRACT is
+            // identical to hardware, which serves raw natively; only the
+            // conversion direction differs. A frame that fails to decode is
+            // dropped (matches the hardware raw path skipping an unreadable
+            // buffer). Every other codec keeps the JPEG passthrough.
+            let rawRequested = config.codec == .raw
             let sink = VideoFrameAdapter { ts, w, h, data in
-                continuation.yield(VideoFrame(
-                    buffer: data,
-                    width: Int(w),
-                    height: Int(h),
-                    presentationTimeUs: ts * 1000,
-                    isCompressed: true
-                ))
+                if rawRequested {
+                    guard let i420 = Self.jpegToI420(data) else { return }
+                    continuation.yield(VideoFrame(
+                        buffer: i420.bytes,
+                        width: i420.width,
+                        height: i420.height,
+                        presentationTimeUs: ts * 1000,
+                        isCompressed: false
+                    ))
+                } else {
+                    continuation.yield(VideoFrame(
+                        buffer: data,
+                        width: Int(w),
+                        height: Int(h),
+                        presentationTimeUs: ts * 1000,
+                        isCompressed: true
+                    ))
+                }
             }
             let streamId = self.core.startVideoStream(
                 frameRate: Int32(config.frameRate),
                 resolution: config.resolution,
                 sink: sink
             )
-            continuation.onTermination = { [core = self.core] _ in
+            self.registerVideoStream(
+                streamId,
+                ActiveStreamInfo(resolution: config.resolution, frameRate: Int(config.frameRate))
+            )
+            continuation.onTermination = { [core = self.core, weak self] _ in
+                self?.unregisterVideoStream(streamId)
                 core.stopVideoStream(streamId: streamId)
             }
         }
+    }
+
+    private func registerVideoStream(_ id: String, _ info: ActiveStreamInfo) {
+        videoStreamsLock.lock(); activeVideoStreams[id] = info; videoStreamsLock.unlock()
+    }
+
+    private func unregisterVideoStream(_ id: String) {
+        videoStreamsLock.lock(); activeVideoStreams.removeValue(forKey: id); videoStreamsLock.unlock()
+    }
+
+    /// C2 observability: report the first armed video stream's config, `nil`
+    /// when none is live. Kotlin twin: `activeStreamInfo()`.
+    public nonisolated func activeStreamInfo() -> ActiveStreamInfo? {
+        videoStreamsLock.lock(); defer { videoStreamsLock.unlock() }
+        return activeVideoStreams.values.first
+    }
+
+    private struct I420Frame { let width: Int; let height: Int; let bytes: Data }
+
+    /// Decode a JPEG to planar I420 (BT.601), even-cropped — the iOS sim twin of
+    /// Kotlin `BrowserSimTransport.jpegToI420`, same coefficients so sim raw
+    /// bytes match the Android sim byte-for-byte. `nil` on decode failure.
+    private static func jpegToI420(_ jpeg: Data) -> I420Frame? {
+        guard let src = CGImageSourceCreateWithData(jpeg as CFData, nil),
+              let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        let w = cg.width & ~1
+        let h = cg.height & ~1
+        if w <= 0 || h <= 0 { return nil }
+        // Draw into a known RGBA8888 buffer so pixel reads are deterministic
+        // (the equivalent of Android's Bitmap.getPixels ARGB source).
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &rgba, width: w, height: h, bitsPerComponent: 8,
+            bytesPerRow: w * 4, space: cs,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let ySize = w * h
+        let cSize = ySize / 4
+        var out = [UInt8](repeating: 0, count: ySize + 2 * cSize)
+        var uIdx = ySize
+        var vIdx = ySize + cSize
+        for row in 0..<h {
+            for col in 0..<w {
+                let p = (row * w + col) * 4
+                let r = Int(rgba[p])
+                let g = Int(rgba[p + 1])
+                let b = Int(rgba[p + 2])
+                out[row * w + col] = UInt8(clamping: ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16)
+                if row % 2 == 0 && col % 2 == 0 {
+                    out[uIdx] = UInt8(clamping: ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128); uIdx += 1
+                    out[vIdx] = UInt8(clamping: ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128); vIdx += 1
+                }
+            }
+        }
+        return I420Frame(width: w, height: h, bytes: Data(out))
     }
 
     public nonisolated func audioChunks(config: AudioChunkConfig) -> AsyncStream<AudioChunk> {

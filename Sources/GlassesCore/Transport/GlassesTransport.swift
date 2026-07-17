@@ -98,6 +98,13 @@ public protocol GlassesTransport: Sendable {
 
     var outgoingAudioFidelity: OutgoingAudioFidelity { get }
 
+    /// The effective config the transport's camera stream is currently armed
+    /// at, or `nil` when nothing is armed (see `ActiveStreamInfo` — the DAT 0.8
+    /// first-armer lock made observable, gap-ledger C2). Default `nil` for
+    /// transports without a shared-stream constraint surface. Mirrors Kotlin
+    /// `GlassesTransport.activeStreamInfo()`.
+    func activeStreamInfo() -> ActiveStreamInfo?
+
     func shutdown() async
 
     /// Optional URL-callback forwarder. Transports that don't participate in
@@ -108,6 +115,11 @@ public protocol GlassesTransport: Sendable {
 
 public extension GlassesTransport {
     func handleUrl(_ url: URL) async -> Bool { false }
+
+    /// Default: nothing armed. `RealMetaTransport` reports the bridge's
+    /// first-armer lock; `BrowserSimTransport` reports its own stream registry;
+    /// `LocalSim` inherits this.
+    func activeStreamInfo() -> ActiveStreamInfo? { nil }
 
     /// Default: not paused. `RealMetaTransport` and `BrowserSimTransport` both
     /// report the real state from the shared Rust core; `LocalSim` inherits this.

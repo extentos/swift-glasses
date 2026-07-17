@@ -11,6 +11,17 @@ public protocol CameraClient: Sendable {
     /// `CaptureError.streamPaused` that `capturePhoto`/`captureVideo` return. A pause
     /// that happens mid-stream is not an error: frames stop and resume on the next tap.
     func videoFrames(config: VideoFrameConfig) -> AsyncThrowingStream<VideoFrame, Error>
+
+    /// The effective config the shared camera stream is currently ARMED at, or
+    /// `nil` when no stream is armed. On real glasses the FIRST camera use locks
+    /// quality/frameRate for the whole session (DAT 0.8 can't reconfigure a live
+    /// stream) — later calls at a different config silently reuse the armed
+    /// stream; this makes that lock observable. Per-frame
+    /// `VideoFrame.width`/`VideoFrame.height` remains the bandwidth
+    /// quality-ladder observable within the armed config.
+    ///
+    /// Android parity: `CameraClient.activeStreamInfo()` (gap-ledger C2).
+    func activeStreamInfo() -> ActiveStreamInfo?
 }
 
 public extension CameraClient {
@@ -19,6 +30,27 @@ public extension CameraClient {
     }
     func videoFrames() -> AsyncThrowingStream<VideoFrame, Error> {
         videoFrames(config: VideoFrameConfig())
+    }
+
+    /// Default: no observable armed stream. Transports without a shared-stream
+    /// constraint surface inherit this (mirrors the Kotlin interface default).
+    func activeStreamInfo() -> ActiveStreamInfo? { nil }
+}
+
+/// The effective config the shared warm camera stream is ARMED at (gap-ledger
+/// C2, EgoFlow's observability ask). On DAT 0.8 the first camera use locks the
+/// live stream's quality/frameRate for the session (the stream can't be
+/// reconfigured live) — later camera calls at a different config silently reuse
+/// the armed stream. This makes the lock observable: `nil` when no stream is
+/// armed. Per-frame `VideoFrame.width`/`VideoFrame.height` remains the
+/// bandwidth quality-ladder observable (the ladder adapts within the armed
+/// config; DAT exposes no ladder events). Mirrors Kotlin `ActiveStreamInfo`.
+public struct ActiveStreamInfo: Sendable, Equatable {
+    public let resolution: Resolution
+    public let frameRate: Int
+    public init(resolution: Resolution, frameRate: Int) {
+        self.resolution = resolution
+        self.frameRate = frameRate
     }
 }
 
@@ -90,6 +122,16 @@ public struct VideoConfig: Sendable {
 public struct VideoFrameConfig: Sendable {
     public var resolution: Resolution
     public var frameRate: Int
+    /// Wire format of the delivered frames — the iOS-native equivalent of the
+    /// Kotlin `VideoFrameConfig.format` (gap-ledger C1). `.hvc1` (the default)
+    /// and `.h264` deliver a decodable **compressed** still per frame (JPEG —
+    /// one `UIImage(data:)` works everywhere, `VideoFrame.isCompressed == true`),
+    /// matching the simulator and the photo path. `.raw` skips the encode and
+    /// hands back the **raw** pre-encode pixel bytes (`isCompressed == false`)
+    /// for streaming/CV pipelines that want the planes — EgoFlow's ask. iOS
+    /// carries this as the existing `Codec`/`isCompressed` pair rather than a
+    /// second `format` enum (Android's `jpeg|raw_yuv` maps 1:1 onto
+    /// `.hvc1/.h264 → jpeg`, `.raw → raw_yuv`).
     public var codec: Codec
     public var backpressure: Backpressure
     public init(
@@ -115,7 +157,18 @@ public struct VideoFrame: Sendable {
     public let buffer: Data
     public let width: Int
     public let height: Int
+    /// Microsecond presentation timestamp at native DAT precision, guaranteed
+    /// strictly-increasing per stream (a non-advancing source timestamp clamps
+    /// to previous+1 µs). This IS the gap-ledger C3 field — iOS exposed µs
+    /// natively from day one and was the parity reference Android's added
+    /// `VideoFrame.timestampUs` mirrors; there is no separate `timestampMs`
+    /// (the ms on Kotlin is a legacy-compat truncation, `presentationTimeUs /
+    /// 1000`).
     public let presentationTimeUs: Int64
+    /// `true` when `buffer` holds a decodable compressed still (JPEG — the
+    /// `.hvc1`/`.h264` default), `false` when it holds the raw pre-encode pixel
+    /// bytes (the `.raw` codec). The frame-level twin of Kotlin
+    /// `VideoFrame.format` (gap-ledger C1).
     public let isCompressed: Bool
     public init(buffer: Data, width: Int, height: Int, presentationTimeUs: Int64, isCompressed: Bool) {
         self.buffer = buffer

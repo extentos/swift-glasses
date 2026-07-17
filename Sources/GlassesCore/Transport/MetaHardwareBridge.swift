@@ -26,6 +26,18 @@ import MWDATCamera
 /// the core entirely — the bridge owns the `Stream` + the
 /// `SharedAudioInput`, so the shell's `AsyncStream<>` consumers go bridge →
 /// sink → stream directly (R10: audio fan-out is shell-side by design).
+/// How long to wait for a freshly-armed stream to reach STREAMING before
+/// escalating — the iOS twin of Kotlin `STREAM_START_TIMEOUT_MS`. 12s,
+/// deliberately LONGER than DAT's own internal link-switch timeout (10s —
+/// LinkManager logs "starting timeout timer for 10000 ms"). The old 5s value
+/// escalated at HALF of DAT's deadline, tearing sessions down while DAT was
+/// still legitimately mid-recovery from its own link races (2026-07-17
+/// forensics: a spurious "main link severed" BLE reset right after a
+/// successful LOW→MEDIUM switch silently stalled the arm; outwaiting DAT beats
+/// amplifying the transient into a lease-dropping cascade). Kotlin parity:
+/// commit 4bf8b600.
+private let STREAM_START_TIMEOUT_MS: UInt64 = 12_000
+
 final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
 
     // ── State (lock-guarded) ─────────────────────────────────────────────
@@ -35,6 +47,11 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
 
     private var deviceSession: MWDATCore.DeviceSession?
     private var streamSession: MWDATCamera.Stream?
+    // C2 observability: the effective config the shared stream is ARMED at
+    // (the DAT 0.8 first-armer lock made observable); `nil` when nothing is
+    // armed. Set at fresh arm, cleared at teardown (`takeStreamSession`).
+    // Kotlin twin: `armedStreamInfo` in MetaHardwareBridge.kt.
+    private var armedStreamInfo: ActiveStreamInfo?
     private var streamCodec: MWDATCamera.VideoCodec?
     private var appLifecycleStateStr = "launch"
     private var reachabilityReady = false
@@ -785,7 +802,18 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
                 do {
                     if let opened = try session.addStream(config: cfg) {
                         opened.start()
-                        lock.lock(); streamSession = opened; streamCodec = codec; lock.unlock()
+                        lock.lock()
+                        streamSession = opened
+                        streamCodec = codec
+                        // C2: the FIRST fresh arm locks the shared stream's
+                        // config for the session — record the effective armed
+                        // config so `activeStreamInfo()` can report it. Reuse /
+                        // reopen branches keep the original lock.
+                        armedStreamInfo = ActiveStreamInfo(
+                            resolution: Self.resolutionFrom(resolution),
+                            frameRate: Int(max(1, frameRate))
+                        )
+                        lock.unlock()
                         attachStreamSessionListeners(stream: opened)
                         stream = opened
                     }
@@ -793,7 +821,7 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
                     armThrew = true
                 }
             }
-            if let stream = stream, await waitForStreaming(stream, timeoutMs: 5000) {
+            if let stream = stream, await waitForStreaming(stream, timeoutMs: STREAM_START_TIMEOUT_MS) {
                 return .streaming(stream)
             }
             if let stream = stream, stream.state == MWDATCamera.StreamState.paused {
@@ -812,6 +840,34 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
             }
         }
         return .failed
+    }
+
+    /// C1 raw path: copy a frame's CVPixelBuffer planes into one contiguous
+    /// `Data` (no JPEG encode). Planar formats (4:2:0 YUV — DAT's native raw
+    /// stream) emit each plane's rows back-to-back; a non-planar buffer (e.g.
+    /// BGRA) emits its single plane. Returns `nil` if the sample buffer carries
+    /// no image buffer. The exact plane layout is the DAT-native equivalent of
+    /// Kotlin's I420 — a documented substrate note, hardware-dogfood verified.
+    private static func rawFrameBytes(from sampleBuffer: CMSampleBuffer) -> (bytes: Data, width: Int, height: Int)? {
+        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        let width = CVPixelBufferGetWidth(pb)
+        let height = CVPixelBufferGetHeight(pb)
+        var out = Data()
+        let planeCount = CVPixelBufferGetPlaneCount(pb)
+        if planeCount == 0 {
+            guard let base = CVPixelBufferGetBaseAddress(pb) else { return nil }
+            let rows = CVPixelBufferGetBytesPerRow(pb) * height
+            out.append(Data(bytes: base, count: rows))
+        } else {
+            for plane in 0..<planeCount {
+                guard let base = CVPixelBufferGetBaseAddressOfPlane(pb, plane) else { return nil }
+                let rows = CVPixelBufferGetBytesPerRowOfPlane(pb, plane) * CVPixelBufferGetHeightOfPlane(pb, plane)
+                out.append(Data(bytes: base, count: rows))
+            }
+        }
+        return (out, width, height)
     }
 
     private static func decodeFrameToImage(_ frame: MWDATCamera.VideoFrame?) -> UIImage? {
@@ -934,7 +990,7 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
             // Only capture when the stream is STREAMING (Android parity). Firing
             // on a not-ready stream (waitingForDevice) returns fired=false and
             // can leave it .stopped — the whole failure mode we saw. Wait for it.
-            let streaming = await self.waitForStreaming(stream, timeoutMs: 5000)
+            let streaming = await self.waitForStreaming(stream, timeoutMs: STREAM_START_TIMEOUT_MS)
             var photoData: MWDATCamera.PhotoData? = nil
             if streaming {
                 // Settle: a capture fired right after the stream JUST reached
@@ -1415,24 +1471,39 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
                 // stream: a non-advancing source timestamp clamps to
                 // previous+1 µs; an advancing one passes through untouched.
                 var lastTsUs = Int64.min
+                // C1 (gap-ledger, EgoFlow's ask): `.raw` skips the JPEG encode
+                // and hands back the DAT-native pre-encode pixel bytes; every
+                // other codec keeps the default decodable-JPEG contract.
+                let rawRequested = config.codec == .raw
                 for await frame in frames {
-                    // RDQ #47 contract: `VideoFrame.data` is JPEG on every
-                    // substrate. Meta decodes for us (makeUIImage) — none of
-                    // the Kotlin bridge's I420 hand-rolling. Undecodable
-                    // frames are skipped, never yielded empty.
-                    guard let image = frame.makeUIImage(),
-                          let jpeg = image.jpegData(compressionQuality: 0.85) else { continue }
+                    // Default: JPEG. Meta decodes for us (makeUIImage) — none of
+                    // the Kotlin bridge's I420 hand-rolling. `.raw`: copy the
+                    // CVPixelBuffer planes through untouched (DAT-native 4:2:0
+                    // planar — the hardware equivalent of Kotlin's I420; exact
+                    // plane-order parity is a hardware-dogfood verify item, per
+                    // the §C findings ledger). Undecodable / unreadable frames
+                    // are skipped either way, never yielded empty.
+                    let payload: (bytes: Data, width: Int, height: Int)?
+                    if rawRequested {
+                        payload = Self.rawFrameBytes(from: frame.sampleBuffer)
+                    } else if let image = frame.makeUIImage(),
+                              let jpeg = image.jpegData(compressionQuality: 0.85) {
+                        payload = (jpeg, Int(image.size.width * image.scale), Int(image.size.height * image.scale))
+                    } else {
+                        payload = nil
+                    }
+                    guard let payload else { continue }
                     let sourceTsUs = Int64(
                         CMTimeGetSeconds(frame.sampleBuffer.presentationTimeStamp) * 1_000_000
                     )
                     let tsUs = sourceTsUs > lastTsUs ? sourceTsUs : lastTsUs + 1
                     lastTsUs = tsUs
                     continuation.yield(VideoFrame(
-                        buffer: jpeg,
-                        width: Int(image.size.width * image.scale),
-                        height: Int(image.size.height * image.scale),
+                        buffer: payload.bytes,
+                        width: payload.width,
+                        height: payload.height,
                         presentationTimeUs: tsUs,
-                        isCompressed: true
+                        isCompressed: !rawRequested
                     ))
                 }
                 continuation.finish()
@@ -1703,7 +1774,15 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
         let s = streamSession
         streamSession = nil
         streamCodec = nil
+        armedStreamInfo = nil // C2: teardown clears the first-armer lock.
         return s
+    }
+
+    /// C2 observability: the effective config the shared camera stream is armed
+    /// at, or `nil` when unarmed. Kotlin parity: `activeStreamInfo()`.
+    func activeStreamInfo() -> ActiveStreamInfo? {
+        lock.lock(); defer { lock.unlock() }
+        return armedStreamInfo
     }
 
     private func takeSttHandle() -> SttEngineHandle? {
@@ -1792,6 +1871,17 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
         case .low: return .low
         case .medium: return .medium
         case .high: return .medium // MWDATCamera high not exposed in 0.6
+        }
+    }
+
+    /// Inverse of `mapResolution` for C2 `activeStreamInfo` reporting — the
+    /// customer-facing `Resolution` the DAT stream is armed at.
+    private static func resolutionFrom(_ s: MWDATCamera.StreamingResolution) -> Resolution {
+        switch s {
+        case .low: return .low
+        case .medium: return .medium
+        case .high: return .high
+        @unknown default: return .medium
         }
     }
 

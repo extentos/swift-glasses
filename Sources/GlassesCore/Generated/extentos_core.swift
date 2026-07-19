@@ -3204,9 +3204,13 @@ public func FfiConverterTypeVoiceCore_lower(_ value: VoiceCore) -> UnsafeMutable
 
 /**
  * A pickable realtime model. `reasoning_capable` marks whether the model
- * accepts the `reasoning.effort` session knob — only `gpt-realtime-2` today.
- * The session builder OMITS the knob when false so the provider doesn't
- * reject the whole session ("Unsupported option for this model").
+ * accepts the `reasoning.effort` session knob — the OpenAI 2.x reasoning line
+ * (`gpt-realtime-2`, `gpt-realtime-2.1`, `gpt-realtime-2.1-mini`) plus both
+ * Gemini Live models. The session builder OMITS the knob when false so the
+ * provider doesn't reject the whole session ("Unsupported option for this
+ * model"). NOTE: 2.1-mini IS reasoning-capable even though the older
+ * `gpt-realtime-mini` is not — it's a distilled reasoning model, not a
+ * re-skin of mini. Don't infer this flag from the name.
  */
 public struct AssistantModel {
     public var id: String

@@ -47,6 +47,27 @@ public enum AssistantEvent: Sendable {
     /// this; fatal errors emit `sessionEnded(reason: .error, ...)` instead.
     case error(kind: String, message: String)
 
+    /// `local-auto` resolved for THIS device. Fires once at session start,
+    /// before any turn.
+    ///
+    /// The honesty half of Auto's contract: the developer chose to delegate
+    /// the model choice, so they are told what it became and why — "I picked
+    /// Auto and don't know whether my user's audio went to the cloud" is the
+    /// one outcome the feature must never produce. It is also what lets a
+    /// privacy-minded app enforce its own local-only policy without the SDK
+    /// shipping a policy setting: read the resolution, decide your own
+    /// consequence.
+    ///
+    /// `servedModelId` is always the CONCRETE model that will run — never
+    /// `local-auto` — and is the id that must reach usage accounting, since
+    /// an unknown id is stamped `needs_pricing` and silently goes unbilled.
+    case autoModelResolved(
+        servedModelId: String,
+        isLocal: Bool,
+        cloudReason: CloudFallbackReason?,
+        downloadTarget: String?
+    )
+
     /// Why the session ended (`sessionEnded.reason`).
     public enum EndReason: String, Sendable {
         /// Customer called `assistant.stop()` / `session.stop()`.

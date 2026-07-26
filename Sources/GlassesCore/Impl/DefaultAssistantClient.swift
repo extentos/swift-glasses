@@ -305,18 +305,23 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
 
     private func doWakeLocked() async throws {
         stateRef.set(.activating)
+        // Observation only (wake ledger) — the wake flow itself is locked.
+        let chime = config.wakeSoundEnabled && !resolvedWakeSoundDisabled
+        WakeLedger.shared.note("wake: begin (chime \(chime ? "on" : "off"))")
         // Wake chime the moment activation begins — it fills the connect
         // wait and queues ahead of the greeting on the same audio path.
         // Dashboard "None" (wakeSoundDisabled) silences it; code-set
         // wakeSoundEnabled=false also wins, independently.
-        if config.wakeSoundEnabled && !resolvedWakeSoundDisabled {
+        if chime {
             runtime?.playWakeSound()
         }
         do {
             guard let rt = runtime else {
+                WakeLedger.shared.note("wake: FAILED — no runtime")
                 throw AssistantError.notReady
             }
             try await rt.connect()
+            WakeLedger.shared.note("wake: connected")
             stateRef.set(.active)
             // Automatic greeting — wake()-only (reconnects don't pass
             // through here), generated OUT-OF-BAND from the memory preamble
@@ -531,12 +536,23 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
         guard let live, !live.sounds.isEmpty, let registry = soundRegistry else { return }
         Task.detached(priority: .utility) {
             let existing = Set(registry.names())
+            var ok: [String] = []
+            var failed: [String] = []
             for sound in live.sounds where !existing.contains(sound.name) {
                 if let pcm = await WakeSoundLoader.load(url: sound.url, targetRate: 24_000) {
                     registry.register(name: sound.name, sampleRate: 24_000, pcm: pcm)
+                    ok.append(sound.name)
                 } else {
+                    failed.append(sound.name)
                 }
             }
+            // Observability for the "I don't hear my sounds" class of bug —
+            // a silent download failure is indistinguishable from a playback
+            // bug without this line.
+            WakeLedger.shared.note(
+                "sounds: registered [\(ok.joined(separator: ", "))]"
+                    + (failed.isEmpty ? "" : " FAILED [\(failed.joined(separator: ", "))]")
+            )
         }
     }
 
@@ -558,6 +574,84 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
             // resolved later, at WS open, so a not-yet-authed device still
             // constructs cleanly. Code-set values WIN over the overlay.
             resolvedModel = model ?? overlay?.realtimeModel
+            // `local-auto` DELEGATES the choice instead of naming a model (the
+            // sacred-choice amendment on LocalTierRegistry). Resolve it to a
+            // CONCRETE id HERE, before any routing decision below, so every
+            // downstream branch — local provider and cloud alike — sees a real
+            // model. Then report what it became: the reporting is not
+            // decoration, it is the half of Auto's contract that keeps it
+            // honest.
+            if resolvedModel == autoModelId() {
+                let choice = LocalTierRegistry.autoResolver?(transport is BrowserSimTransport)
+                    ?? .cloud(reason: .noEligibleRungs, downloadTarget: nil)
+                switch choice {
+                case .local(let modelId):
+                    resolvedModel = modelId
+                    onAssistantEvent(.autoModelResolved(
+                        servedModelId: modelId,
+                        isLocal: true,
+                        cloudReason: nil,
+                        downloadTarget: nil
+                    ))
+                case .cloud(let reason, let downloadTarget):
+                    // The cloud leg carries the RESOLVED id upstream, never
+                    // `local-auto`: an unknown model id is stamped
+                    // `needs_pricing` and goes silently unbilled.
+                    let fallback = autoCloudFallbackModel()
+                    resolvedModel = fallback
+                    onAssistantEvent(.autoModelResolved(
+                        servedModelId: fallback,
+                        isLocal: false,
+                        cloudReason: reason,
+                        downloadTarget: downloadTarget
+                    ))
+                }
+            }
+            // Local realtime v2 (doc 14 Phase 2.5): a local-* id routes to
+            // the local provider. Which BRAIN backs it depends on where the
+            // session runs (the sacred-choice rule — the selected model is
+            // the served model, everywhere):
+            //   - Browser-sim session → HostedLocalBrain for EVERY local-*
+            //     id: the gateway serves the SAME model from Extentos's
+            //     inference machine. Uniform, zero downloads, and it works
+            //     without GlassesLocal linked (decision file: local-models-
+            //     sim-serving-and-sacred-choice.md).
+            //   - Everything else (real hardware, local sim) → on-device via
+            //     the registered GlassesLocal factory. Unregistered = cloud
+            //     path unchanged (the config client falls back sensibly).
+            if let localModel = resolvedModel, localModel.hasPrefix("local-") {
+                if transport is BrowserSimTransport {
+                    return LocalRealtimeProvider(
+                        config: effectiveConfig,
+                        model: localModel,
+                        voice: voice ?? overlay?.voice,
+                        brain: HostedLocalBrain(model: localModel, backing: backing),
+                        audio: audio,
+                        transport: transport,
+                        onAssistantEvent: onAssistantEvent,
+                        onSilenceTimeout: { [weak self] in
+                            guard let self else { return }
+                            Task { try? await self.sleep() }
+                        }
+                    )
+                }
+                if let factory = LocalTierRegistry.brainFactory,
+                   let brain = factory(localModel) {
+                    return LocalRealtimeProvider(
+                        config: effectiveConfig,
+                        model: localModel,
+                        voice: voice ?? overlay?.voice,
+                        brain: brain,
+                        audio: audio,
+                        transport: transport,
+                        onAssistantEvent: onAssistantEvent,
+                        onSilenceTimeout: { [weak self] in
+                            guard let self else { return }
+                            Task { try? await self.sleep() }
+                        }
+                    )
+                }
+            }
             return RealtimeCoreProvider(
                 config: effectiveConfig,
                 model: resolvedModel,

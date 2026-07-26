@@ -15,12 +15,47 @@ enum WakeSoundLoader {
     /// memory; matches the dashboard's upload guidance.
     private static let maxSamples = 10 * 48_000
 
+    /// Gateway passthrough for the storage CDN — some client networks
+    /// (QUIC-hostile paths; the iOS-Simulator-on-VPS case, 2026-07-25:
+    /// NSURLErrorCannotParseResponse on every fetch) can't reach the CDN
+    /// directly while the gateway host works. The backend locks this route
+    /// to the public wake-sounds path.
+    private static func proxied(_ url: String) -> URL? {
+        var comps = URLComponents(string: "https://api.extentos.com/api/sounds/proxy")
+        comps?.queryItems = [URLQueryItem(name: "src", value: url)]
+        return comps?.url
+    }
+
     static func load(url: String, targetRate: Int32) async -> Data? {
-        guard let remote = URL(string: url) else { return nil }
-        guard let (data, response) = try? await URLSession.shared.data(from: remote),
-              (response as? HTTPURLResponse).map({ $0.statusCode == 200 }) ?? true,
-              !data.isEmpty
-        else { return nil }
+        guard let remote = URL(string: url) else {
+            WakeLedger.shared.note("sound load: bad url")
+            return nil
+        }
+        func fetch(_ from: URL) async throws -> Data {
+            let (d, response) = try await URLSession.shared.data(from: from)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+            guard status == 200, !d.isEmpty else {
+                throw URLError(.badServerResponse)
+            }
+            return d
+        }
+        var data: Data
+        do {
+            data = try await fetch(remote)
+        } catch {
+            // Direct CDN fetch failed — fall back to the gateway passthrough.
+            guard let via = proxied(url) else {
+                WakeLedger.shared.note("sound load: download failed — \(error.localizedDescription)")
+                return nil
+            }
+            do {
+                data = try await fetch(via)
+                WakeLedger.shared.note("sound load: direct failed, gateway proxy OK")
+            } catch {
+                WakeLedger.shared.note("sound load: download failed (direct+proxy) — \(error.localizedDescription)")
+                return nil
+            }
+        }
 
         // AVAudioFile reads from a file URL — stage the download.
         let tmp = FileManager.default.temporaryDirectory
@@ -31,6 +66,7 @@ enum WakeSoundLoader {
             try data.write(to: tmp)
             return try decode(fileUrl: tmp, targetRate: targetRate)
         } catch {
+            WakeLedger.shared.note("sound load: decode failed — \(error.localizedDescription)")
             return nil
         }
     }

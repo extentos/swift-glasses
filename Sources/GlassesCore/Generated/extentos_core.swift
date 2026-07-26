@@ -431,6 +431,22 @@ fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
+    typealias FfiType = UInt64
+    typealias SwiftType = UInt64
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt64 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
     typealias FfiType = Int64
     typealias SwiftType = Int64
@@ -633,6 +649,15 @@ public protocol BrowserSimCoreProtocol : AnyObject {
      * Backs the shell's `GlassesTransport.currentDeviceModelId()`.
      */
     func deviceModelId()  -> String?
+    
+    /**
+     * The session's current device VENDOR wire id ("meta", …) — the vendor
+     * half of the identity dial, catalog-resolved by the backend and captured
+     * from the same frames as `device_model_id`. `None` until a vendor-aware
+     * backend delivers it. Backs the shell's
+     * `GlassesTransport.currentVendorId()`.
+     */
+    func deviceVendor()  -> String?
     
     /**
      * End the session at the customer's request.
@@ -984,6 +1009,20 @@ open func deviceModelId() -> String? {
 }
     
     /**
+     * The session's current device VENDOR wire id ("meta", …) — the vendor
+     * half of the identity dial, catalog-resolved by the backend and captured
+     * from the same frames as `device_model_id`. `None` until a vendor-aware
+     * backend delivers it. Backs the shell's
+     * `GlassesTransport.currentVendorId()`.
+     */
+open func deviceVendor() -> String? {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_browsersimcore_device_vendor(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
      * End the session at the customer's request.
      */
 open func disconnect() {try! rustCall() {
@@ -1305,6 +1344,346 @@ public func FfiConverterTypeBrowserSimCore_lower(_ value: BrowserSimCore) -> Uns
 
 
 /**
+ * The shells' handle: thread-safe wrapper over the pure machine. One
+ * instance per assistant session; `handle` is the only entry point.
+ */
+public protocol ConversationLoopProtocol : AnyObject {
+    
+    /**
+     * Feed one event; execute the returned effects in order.
+     */
+    func handle(event: ConversationEvent)  -> [ConversationEffect]
+    
+    /**
+     * Silence auto-sleep (AssistantConfig.silenceTimeout): while LISTENING,
+     * this much silence yields `RequestSleep`. None/unset (the default) =
+     * no auto-sleep — the same opt-in contract the cloud provider honors.
+     * Set before `Start`; a mid-session change applies from the next
+     * LISTENING (re)entry.
+     */
+    func setSilenceTimeoutMs(ms: UInt32?) 
+    
+    /**
+     * Observability (event log / debugging) — never used for control flow.
+     */
+    func state()  -> ConversationState
+    
+}
+
+/**
+ * The shells' handle: thread-safe wrapper over the pure machine. One
+ * instance per assistant session; `handle` is the only entry point.
+ */
+open class ConversationLoop:
+    ConversationLoopProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_extentos_core_fn_clone_conversationloop(self.pointer, $0) }
+    }
+public convenience init() {
+    let pointer =
+        try! rustCall() {
+    uniffi_extentos_core_fn_constructor_conversationloop_new($0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_extentos_core_fn_free_conversationloop(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Feed one event; execute the returned effects in order.
+     */
+open func handle(event: ConversationEvent) -> [ConversationEffect] {
+    return try!  FfiConverterSequenceTypeConversationEffect.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_conversationloop_handle(self.uniffiClonePointer(),
+        FfiConverterTypeConversationEvent.lower(event),$0
+    )
+})
+}
+    
+    /**
+     * Silence auto-sleep (AssistantConfig.silenceTimeout): while LISTENING,
+     * this much silence yields `RequestSleep`. None/unset (the default) =
+     * no auto-sleep — the same opt-in contract the cloud provider honors.
+     * Set before `Start`; a mid-session change applies from the next
+     * LISTENING (re)entry.
+     */
+open func setSilenceTimeoutMs(ms: UInt32?) {try! rustCall() {
+    uniffi_extentos_core_fn_method_conversationloop_set_silence_timeout_ms(self.uniffiClonePointer(),
+        FfiConverterOptionUInt32.lower(ms),$0
+    )
+}
+}
+    
+    /**
+     * Observability (event log / debugging) — never used for control flow.
+     */
+open func state() -> ConversationState {
+    return try!  FfiConverterTypeConversationState.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_conversationloop_state(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeConversationLoop: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = ConversationLoop
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> ConversationLoop {
+        return ConversationLoop(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: ConversationLoop) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConversationLoop {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: ConversationLoop, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationLoop_lift(_ pointer: UnsafeMutableRawPointer) throws -> ConversationLoop {
+    return try FfiConverterTypeConversationLoop.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationLoop_lower(_ value: ConversationLoop) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeConversationLoop.lower(value)
+}
+
+
+
+
+/**
+ * Per-recognition-session endpoint decider. The shell feeds every buffer's
+ * RMS through `tick` and every partial through `note_partial`; `reset`
+ * starts a fresh utterance (new recognition session, or after Finalize —
+ * which also self-resets).
+ */
+public protocol EndpointDeciderProtocol : AnyObject {
+    
+    func notePartial(nowMs: Int64, words: UInt32) 
+    
+    func reset() 
+    
+    func tick(nowMs: Int64, rms: Double)  -> EndpointVerdict
+    
+}
+
+/**
+ * Per-recognition-session endpoint decider. The shell feeds every buffer's
+ * RMS through `tick` and every partial through `note_partial`; `reset`
+ * starts a fresh utterance (new recognition session, or after Finalize —
+ * which also self-resets).
+ */
+open class EndpointDecider:
+    EndpointDeciderProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_extentos_core_fn_clone_endpointdecider(self.pointer, $0) }
+    }
+public convenience init(config: EndpointConfig) {
+    let pointer =
+        try! rustCall() {
+    uniffi_extentos_core_fn_constructor_endpointdecider_new(
+        FfiConverterTypeEndpointConfig.lower(config),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_extentos_core_fn_free_endpointdecider(pointer, $0) }
+    }
+
+    
+
+    
+open func notePartial(nowMs: Int64, words: UInt32) {try! rustCall() {
+    uniffi_extentos_core_fn_method_endpointdecider_note_partial(self.uniffiClonePointer(),
+        FfiConverterInt64.lower(nowMs),
+        FfiConverterUInt32.lower(words),$0
+    )
+}
+}
+    
+open func reset() {try! rustCall() {
+    uniffi_extentos_core_fn_method_endpointdecider_reset(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+open func tick(nowMs: Int64, rms: Double) -> EndpointVerdict {
+    return try!  FfiConverterTypeEndpointVerdict.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_endpointdecider_tick(self.uniffiClonePointer(),
+        FfiConverterInt64.lower(nowMs),
+        FfiConverterDouble.lower(rms),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEndpointDecider: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = EndpointDecider
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> EndpointDecider {
+        return EndpointDecider(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: EndpointDecider) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EndpointDecider {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: EndpointDecider, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEndpointDecider_lift(_ pointer: UnsafeMutableRawPointer) throws -> EndpointDecider {
+    return try FfiConverterTypeEndpointDecider.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEndpointDecider_lower(_ value: EndpointDecider) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeEndpointDecider.lower(value)
+}
+
+
+
+
+/**
  * Durable asset-key → hosted-copy registry, shared by video AND photo
  * (DSP-29). Pure synchronous state behind one `Mutex` (mirrors `VoiceCore`); no
  * IO and no async cross the FFI here — the shell drives the network and the
@@ -1524,6 +1903,135 @@ public func FfiConverterTypeHostedMediaRegistry_lift(_ pointer: UnsafeMutableRaw
 #endif
 public func FfiConverterTypeHostedMediaRegistry_lower(_ value: HostedMediaRegistry) -> UnsafeMutableRawPointer {
     return FfiConverterTypeHostedMediaRegistry.lower(value)
+}
+
+
+
+
+public protocol InterruptionClassifierProtocol : AnyObject {
+    
+    func classify(speech: SpeechObservation)  -> InterruptionVerdict
+    
+}
+
+open class InterruptionClassifier:
+    InterruptionClassifierProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_extentos_core_fn_clone_interruptionclassifier(self.pointer, $0) }
+    }
+public convenience init(config: InterruptionConfig) {
+    let pointer =
+        try! rustCall() {
+    uniffi_extentos_core_fn_constructor_interruptionclassifier_new(
+        FfiConverterTypeInterruptionConfig.lower(config),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_extentos_core_fn_free_interruptionclassifier(pointer, $0) }
+    }
+
+    
+
+    
+open func classify(speech: SpeechObservation) -> InterruptionVerdict {
+    return try!  FfiConverterTypeInterruptionVerdict.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_interruptionclassifier_classify(self.uniffiClonePointer(),
+        FfiConverterTypeSpeechObservation.lower(speech),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeInterruptionClassifier: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = InterruptionClassifier
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> InterruptionClassifier {
+        return InterruptionClassifier(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: InterruptionClassifier) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> InterruptionClassifier {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: InterruptionClassifier, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInterruptionClassifier_lift(_ pointer: UnsafeMutableRawPointer) throws -> InterruptionClassifier {
+    return try FfiConverterTypeInterruptionClassifier.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInterruptionClassifier_lower(_ value: InterruptionClassifier) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeInterruptionClassifier.lower(value)
 }
 
 
@@ -2972,6 +3480,170 @@ public func FfiConverterTypeSoundRegistry_lift(_ pointer: UnsafeMutableRawPointe
 #endif
 public func FfiConverterTypeSoundRegistry_lower(_ value: SoundRegistry) -> UnsafeMutableRawPointer {
     return FfiConverterTypeSoundRegistry.lower(value)
+}
+
+
+
+
+/**
+ * Tracks the duration of the current speech run from raw RMS ticks. The
+ * shell feeds the returned duration to the InterruptionClassifier
+ * (`word_count: None`) — speech sustained past the classifier's 500 ms
+ * floor interrupts ~300–500 ms after onset in the median case and SECONDS
+ * earlier on the b16 outliers (firstPartial 2.6 s / 5.0 s), because no
+ * transcript is needed to take the floor.
+ */
+public protocol SpeechRunTrackerProtocol : AnyObject {
+    
+    func reset() 
+    
+    /**
+     * Feed one buffer's RMS; returns the current speech-run duration in
+     * ms, or 0 when no run is active. A run survives dips shorter than
+     * the hangover.
+     */
+    func tick(nowMs: Int64, rms: Double)  -> UInt32
+    
+}
+
+/**
+ * Tracks the duration of the current speech run from raw RMS ticks. The
+ * shell feeds the returned duration to the InterruptionClassifier
+ * (`word_count: None`) — speech sustained past the classifier's 500 ms
+ * floor interrupts ~300–500 ms after onset in the median case and SECONDS
+ * earlier on the b16 outliers (firstPartial 2.6 s / 5.0 s), because no
+ * transcript is needed to take the floor.
+ */
+open class SpeechRunTracker:
+    SpeechRunTrackerProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_extentos_core_fn_clone_speechruntracker(self.pointer, $0) }
+    }
+public convenience init(config: OnsetConfig) {
+    let pointer =
+        try! rustCall() {
+    uniffi_extentos_core_fn_constructor_speechruntracker_new(
+        FfiConverterTypeOnsetConfig.lower(config),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_extentos_core_fn_free_speechruntracker(pointer, $0) }
+    }
+
+    
+
+    
+open func reset() {try! rustCall() {
+    uniffi_extentos_core_fn_method_speechruntracker_reset(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
+     * Feed one buffer's RMS; returns the current speech-run duration in
+     * ms, or 0 when no run is active. A run survives dips shorter than
+     * the hangover.
+     */
+open func tick(nowMs: Int64, rms: Double) -> UInt32 {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_speechruntracker_tick(self.uniffiClonePointer(),
+        FfiConverterInt64.lower(nowMs),
+        FfiConverterDouble.lower(rms),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSpeechRunTracker: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = SpeechRunTracker
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> SpeechRunTracker {
+        return SpeechRunTracker(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: SpeechRunTracker) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SpeechRunTracker {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: SpeechRunTracker, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSpeechRunTracker_lift(_ pointer: UnsafeMutableRawPointer) throws -> SpeechRunTracker {
+    return try FfiConverterTypeSpeechRunTracker.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSpeechRunTracker_lower(_ value: SpeechRunTracker) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeSpeechRunTracker.lower(value)
 }
 
 
@@ -4549,6 +5221,103 @@ public func FfiConverterTypeDeviceInfo_lower(_ value: DeviceInfo) -> RustBuffer 
 
 
 /**
+ * What the shell knows about this device's memory.
+ */
+public struct DeviceMemory {
+    /**
+     * Memory this device CLASS can sustainably give one app. Stable across
+     * runs — this stability is what makes the choice deterministic.
+     *
+     * Each platform maps its own mechanism into this one number:
+     * **iOS** reports the per-process (jetsam) ceiling, which already IS a
+     * per-process budget. **Android** reports a sustainable fraction of
+     * total device RAM — total RAM itself is not a budget, since the rest
+     * of the system keeps using it.
+     */
+    public var classBudgetMb: UInt64
+    /**
+     * Free memory right now. A guard only, never the classifier: it can
+     * force a one-session step down, and nothing else.
+     */
+    public var availableNowMb: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Memory this device CLASS can sustainably give one app. Stable across
+         * runs — this stability is what makes the choice deterministic.
+         *
+         * Each platform maps its own mechanism into this one number:
+         * **iOS** reports the per-process (jetsam) ceiling, which already IS a
+         * per-process budget. **Android** reports a sustainable fraction of
+         * total device RAM — total RAM itself is not a budget, since the rest
+         * of the system keeps using it.
+         */classBudgetMb: UInt64, 
+        /**
+         * Free memory right now. A guard only, never the classifier: it can
+         * force a one-session step down, and nothing else.
+         */availableNowMb: UInt64) {
+        self.classBudgetMb = classBudgetMb
+        self.availableNowMb = availableNowMb
+    }
+}
+
+
+
+extension DeviceMemory: Equatable, Hashable {
+    public static func ==(lhs: DeviceMemory, rhs: DeviceMemory) -> Bool {
+        if lhs.classBudgetMb != rhs.classBudgetMb {
+            return false
+        }
+        if lhs.availableNowMb != rhs.availableNowMb {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(classBudgetMb)
+        hasher.combine(availableNowMb)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDeviceMemory: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DeviceMemory {
+        return
+            try DeviceMemory(
+                classBudgetMb: FfiConverterUInt64.read(from: &buf), 
+                availableNowMb: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DeviceMemory, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.classBudgetMb, into: &buf)
+        FfiConverterUInt64.write(value.availableNowMb, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceMemory_lift(_ buf: RustBuffer) throws -> DeviceMemory {
+    return try FfiConverterTypeDeviceMemory.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceMemory_lower(_ value: DeviceMemory) -> RustBuffer {
+    return FfiConverterTypeDeviceMemory.lower(value)
+}
+
+
+/**
  * WARN payload for a dropped mixed-case video — the shell logs it under
  * `display.video_dropped` verbatim.
  */
@@ -4708,6 +5477,143 @@ public func FfiConverterTypeEdgeInsets_lift(_ buf: RustBuffer) throws -> EdgeIns
 #endif
 public func FfiConverterTypeEdgeInsets_lower(_ value: EdgeInsets) -> RustBuffer {
     return FfiConverterTypeEdgeInsets.lower(value)
+}
+
+
+/**
+ * Tunables. `base_silence_ms` + `speech_rms_threshold` defaults equal the
+ * shipped fixed-window behavior — a decider with no partial evidence IS
+ * today's endpointer. The fast tier only ever engages on positive shape
+ * evidence (a real, stalled partial), so its failure mode degrades to the
+ * production path, never below it.
+ */
+public struct EndpointConfig {
+    /**
+     * RMS at/above this is speech (production value).
+     */
+    public var speechRmsThreshold: Double
+    /**
+     * Patience with no (or still-growing) partial evidence — the shipped
+     * fixed window.
+     */
+    public var baseSilenceMs: UInt32
+    /**
+     * Patience when the partial shape says the thought looks finished.
+     */
+    public var fastSilenceMs: UInt32
+    /**
+     * The fast tier needs at least this many transcribed words (a bare
+     * "No" keeps base patience — b16 shows short utterances often finalize
+     * with no partial at all).
+     */
+    public var fastMinWords: UInt32
+    /**
+     * A partial must have stopped growing for this long to count as
+     * "finished thought" (≈ 2× the b16 healthy partial-gap p50 — a lagging
+     * recognizer mid-sentence never looks stalled).
+     */
+    public var partialStallMs: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * RMS at/above this is speech (production value).
+         */speechRmsThreshold: Double, 
+        /**
+         * Patience with no (or still-growing) partial evidence — the shipped
+         * fixed window.
+         */baseSilenceMs: UInt32, 
+        /**
+         * Patience when the partial shape says the thought looks finished.
+         */fastSilenceMs: UInt32, 
+        /**
+         * The fast tier needs at least this many transcribed words (a bare
+         * "No" keeps base patience — b16 shows short utterances often finalize
+         * with no partial at all).
+         */fastMinWords: UInt32, 
+        /**
+         * A partial must have stopped growing for this long to count as
+         * "finished thought" (≈ 2× the b16 healthy partial-gap p50 — a lagging
+         * recognizer mid-sentence never looks stalled).
+         */partialStallMs: UInt32) {
+        self.speechRmsThreshold = speechRmsThreshold
+        self.baseSilenceMs = baseSilenceMs
+        self.fastSilenceMs = fastSilenceMs
+        self.fastMinWords = fastMinWords
+        self.partialStallMs = partialStallMs
+    }
+}
+
+
+
+extension EndpointConfig: Equatable, Hashable {
+    public static func ==(lhs: EndpointConfig, rhs: EndpointConfig) -> Bool {
+        if lhs.speechRmsThreshold != rhs.speechRmsThreshold {
+            return false
+        }
+        if lhs.baseSilenceMs != rhs.baseSilenceMs {
+            return false
+        }
+        if lhs.fastSilenceMs != rhs.fastSilenceMs {
+            return false
+        }
+        if lhs.fastMinWords != rhs.fastMinWords {
+            return false
+        }
+        if lhs.partialStallMs != rhs.partialStallMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(speechRmsThreshold)
+        hasher.combine(baseSilenceMs)
+        hasher.combine(fastSilenceMs)
+        hasher.combine(fastMinWords)
+        hasher.combine(partialStallMs)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEndpointConfig: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EndpointConfig {
+        return
+            try EndpointConfig(
+                speechRmsThreshold: FfiConverterDouble.read(from: &buf), 
+                baseSilenceMs: FfiConverterUInt32.read(from: &buf), 
+                fastSilenceMs: FfiConverterUInt32.read(from: &buf), 
+                fastMinWords: FfiConverterUInt32.read(from: &buf), 
+                partialStallMs: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: EndpointConfig, into buf: inout [UInt8]) {
+        FfiConverterDouble.write(value.speechRmsThreshold, into: &buf)
+        FfiConverterUInt32.write(value.baseSilenceMs, into: &buf)
+        FfiConverterUInt32.write(value.fastSilenceMs, into: &buf)
+        FfiConverterUInt32.write(value.fastMinWords, into: &buf)
+        FfiConverterUInt32.write(value.partialStallMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEndpointConfig_lift(_ buf: RustBuffer) throws -> EndpointConfig {
+    return try FfiConverterTypeEndpointConfig.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEndpointConfig_lower(_ value: EndpointConfig) -> RustBuffer {
+    return FfiConverterTypeEndpointConfig.lower(value)
 }
 
 
@@ -4937,6 +5843,247 @@ public func FfiConverterTypeHostedAsset_lower(_ value: HostedAsset) -> RustBuffe
 
 
 /**
+ * Tunables. Defaults are the production values LiveKit ships; measured
+ * re-tuning on hardware belongs here, in one place.
+ */
+public struct InterruptionConfig {
+    /**
+     * Speech shorter than this never interrupts (coughs, clicks, blips).
+     */
+    public var minDurationMs: UInt32
+    /**
+     * Minimum transcript word count to interrupt; 0 disables the check
+     * (duration alone decides). Only meaningful when words are known.
+     */
+    public var minWords: UInt32
+    /**
+     * Overlapping speech beginning within this window after the agent
+     * started speaking is treated as a backchannel ("mm", "okay") and does
+     * not interrupt — unless it is long enough to be real speech.
+     */
+    public var backchannelWindowMs: UInt32
+    /**
+     * Speech at/above this duration interrupts even inside the
+     * backchannel window (a real sentence is never a backchannel).
+     */
+    public var backchannelOverrideDurationMs: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Speech shorter than this never interrupts (coughs, clicks, blips).
+         */minDurationMs: UInt32, 
+        /**
+         * Minimum transcript word count to interrupt; 0 disables the check
+         * (duration alone decides). Only meaningful when words are known.
+         */minWords: UInt32, 
+        /**
+         * Overlapping speech beginning within this window after the agent
+         * started speaking is treated as a backchannel ("mm", "okay") and does
+         * not interrupt — unless it is long enough to be real speech.
+         */backchannelWindowMs: UInt32, 
+        /**
+         * Speech at/above this duration interrupts even inside the
+         * backchannel window (a real sentence is never a backchannel).
+         */backchannelOverrideDurationMs: UInt32) {
+        self.minDurationMs = minDurationMs
+        self.minWords = minWords
+        self.backchannelWindowMs = backchannelWindowMs
+        self.backchannelOverrideDurationMs = backchannelOverrideDurationMs
+    }
+}
+
+
+
+extension InterruptionConfig: Equatable, Hashable {
+    public static func ==(lhs: InterruptionConfig, rhs: InterruptionConfig) -> Bool {
+        if lhs.minDurationMs != rhs.minDurationMs {
+            return false
+        }
+        if lhs.minWords != rhs.minWords {
+            return false
+        }
+        if lhs.backchannelWindowMs != rhs.backchannelWindowMs {
+            return false
+        }
+        if lhs.backchannelOverrideDurationMs != rhs.backchannelOverrideDurationMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(minDurationMs)
+        hasher.combine(minWords)
+        hasher.combine(backchannelWindowMs)
+        hasher.combine(backchannelOverrideDurationMs)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeInterruptionConfig: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> InterruptionConfig {
+        return
+            try InterruptionConfig(
+                minDurationMs: FfiConverterUInt32.read(from: &buf), 
+                minWords: FfiConverterUInt32.read(from: &buf), 
+                backchannelWindowMs: FfiConverterUInt32.read(from: &buf), 
+                backchannelOverrideDurationMs: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: InterruptionConfig, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.minDurationMs, into: &buf)
+        FfiConverterUInt32.write(value.minWords, into: &buf)
+        FfiConverterUInt32.write(value.backchannelWindowMs, into: &buf)
+        FfiConverterUInt32.write(value.backchannelOverrideDurationMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInterruptionConfig_lift(_ buf: RustBuffer) throws -> InterruptionConfig {
+    return try FfiConverterTypeInterruptionConfig.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInterruptionConfig_lower(_ value: InterruptionConfig) -> RustBuffer {
+    return FfiConverterTypeInterruptionConfig.lower(value)
+}
+
+
+/**
+ * One rung of a platform's local model ladder, as the shell sees it.
+ *
+ * The shell owns the catalog (Android `LocalModels.ALL`, iOS the MLX
+ * catalog) and reports it here per resolution, because two of these fields
+ * are live facts rather than static data.
+ */
+public struct LocalRung {
+    /**
+     * Catalog id — e.g. `local-qwen3-1.7b`. Returned verbatim as the
+     * resolution, and it is this id (never `local-auto`) that must reach
+     * usage accounting.
+     */
+    public var modelId: String
+    /**
+     * Memory floor for loading this rung: weights + KV cache at the rung's
+     * context size + runtime overhead. The platform's own number.
+     */
+    public var requiredMb: UInt64
+    /**
+     * May Auto select this rung? `false` marks a rung that fits in memory
+     * but sits below the tool-competence floor — pinnable, never automatic.
+     */
+    public var autoEligible: Bool
+    /**
+     * Are the weights already on disk? Auto never triggers a download by
+     * itself; the cloud serves while the user's deliberate download lands.
+     */
+    public var weightsPresent: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Catalog id — e.g. `local-qwen3-1.7b`. Returned verbatim as the
+         * resolution, and it is this id (never `local-auto`) that must reach
+         * usage accounting.
+         */modelId: String, 
+        /**
+         * Memory floor for loading this rung: weights + KV cache at the rung's
+         * context size + runtime overhead. The platform's own number.
+         */requiredMb: UInt64, 
+        /**
+         * May Auto select this rung? `false` marks a rung that fits in memory
+         * but sits below the tool-competence floor — pinnable, never automatic.
+         */autoEligible: Bool, 
+        /**
+         * Are the weights already on disk? Auto never triggers a download by
+         * itself; the cloud serves while the user's deliberate download lands.
+         */weightsPresent: Bool) {
+        self.modelId = modelId
+        self.requiredMb = requiredMb
+        self.autoEligible = autoEligible
+        self.weightsPresent = weightsPresent
+    }
+}
+
+
+
+extension LocalRung: Equatable, Hashable {
+    public static func ==(lhs: LocalRung, rhs: LocalRung) -> Bool {
+        if lhs.modelId != rhs.modelId {
+            return false
+        }
+        if lhs.requiredMb != rhs.requiredMb {
+            return false
+        }
+        if lhs.autoEligible != rhs.autoEligible {
+            return false
+        }
+        if lhs.weightsPresent != rhs.weightsPresent {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(modelId)
+        hasher.combine(requiredMb)
+        hasher.combine(autoEligible)
+        hasher.combine(weightsPresent)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLocalRung: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LocalRung {
+        return
+            try LocalRung(
+                modelId: FfiConverterString.read(from: &buf), 
+                requiredMb: FfiConverterUInt64.read(from: &buf), 
+                autoEligible: FfiConverterBool.read(from: &buf), 
+                weightsPresent: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LocalRung, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.modelId, into: &buf)
+        FfiConverterUInt64.write(value.requiredMb, into: &buf)
+        FfiConverterBool.write(value.autoEligible, into: &buf)
+        FfiConverterBool.write(value.weightsPresent, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLocalRung_lift(_ buf: RustBuffer) throws -> LocalRung {
+    return try FfiConverterTypeLocalRung.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLocalRung_lower(_ value: LocalRung) -> RustBuffer {
+    return FfiConverterTypeLocalRung.lower(value)
+}
+
+
+/**
  * A normalized `show{}` root: the single tree to hand the transport, its
  * shownKind, and the WARN to log if the mixed-video rule dropped anything.
  */
@@ -5011,6 +6158,83 @@ public func FfiConverterTypeNormalizedRoot_lift(_ buf: RustBuffer) throws -> Nor
 #endif
 public func FfiConverterTypeNormalizedRoot_lower(_ value: NormalizedRoot) -> RustBuffer {
     return FfiConverterTypeNormalizedRoot.lower(value)
+}
+
+
+/**
+ * Tunables for the onset tracker. The hangover bridges intra-phrase dips
+ * (b16: partials keep arriving at 150–270 ms cadence through them) so a
+ * run measures a burst of speech, not one syllable.
+ */
+public struct OnsetConfig {
+    public var speechRmsThreshold: Double
+    /**
+     * Silence shorter than this does not end a run.
+     */
+    public var hangoverMs: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(speechRmsThreshold: Double, 
+        /**
+         * Silence shorter than this does not end a run.
+         */hangoverMs: UInt32) {
+        self.speechRmsThreshold = speechRmsThreshold
+        self.hangoverMs = hangoverMs
+    }
+}
+
+
+
+extension OnsetConfig: Equatable, Hashable {
+    public static func ==(lhs: OnsetConfig, rhs: OnsetConfig) -> Bool {
+        if lhs.speechRmsThreshold != rhs.speechRmsThreshold {
+            return false
+        }
+        if lhs.hangoverMs != rhs.hangoverMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(speechRmsThreshold)
+        hasher.combine(hangoverMs)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOnsetConfig: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OnsetConfig {
+        return
+            try OnsetConfig(
+                speechRmsThreshold: FfiConverterDouble.read(from: &buf), 
+                hangoverMs: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OnsetConfig, into buf: inout [UInt8]) {
+        FfiConverterDouble.write(value.speechRmsThreshold, into: &buf)
+        FfiConverterUInt32.write(value.hangoverMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOnsetConfig_lift(_ buf: RustBuffer) throws -> OnsetConfig {
+    return try FfiConverterTypeOnsetConfig.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOnsetConfig_lower(_ value: OnsetConfig) -> RustBuffer {
+    return FfiConverterTypeOnsetConfig.lower(value)
 }
 
 
@@ -6129,6 +7353,101 @@ public func FfiConverterTypeSpeakConfigWire_lift(_ buf: RustBuffer) throws -> Sp
 #endif
 public func FfiConverterTypeSpeakConfigWire_lower(_ value: SpeakConfigWire) -> RustBuffer {
     return FfiConverterTypeSpeakConfigWire.lower(value)
+}
+
+
+/**
+ * What the shell observed about a stretch of user speech. `word_count` is
+ * `None` when no transcript exists yet (onset-time classification);
+ * `is_echo` is the transcript-level own-voice check where available.
+ */
+public struct SpeechObservation {
+    public var durationMs: UInt32
+    public var wordCount: UInt32?
+    public var isEcho: Bool
+    /**
+     * Milliseconds since the agent's current utterance began speaking;
+     * `None` when the agent is not speaking (e.g. thinking).
+     */
+    public var agentSpeakingElapsedMs: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(durationMs: UInt32, wordCount: UInt32?, isEcho: Bool, 
+        /**
+         * Milliseconds since the agent's current utterance began speaking;
+         * `None` when the agent is not speaking (e.g. thinking).
+         */agentSpeakingElapsedMs: UInt32?) {
+        self.durationMs = durationMs
+        self.wordCount = wordCount
+        self.isEcho = isEcho
+        self.agentSpeakingElapsedMs = agentSpeakingElapsedMs
+    }
+}
+
+
+
+extension SpeechObservation: Equatable, Hashable {
+    public static func ==(lhs: SpeechObservation, rhs: SpeechObservation) -> Bool {
+        if lhs.durationMs != rhs.durationMs {
+            return false
+        }
+        if lhs.wordCount != rhs.wordCount {
+            return false
+        }
+        if lhs.isEcho != rhs.isEcho {
+            return false
+        }
+        if lhs.agentSpeakingElapsedMs != rhs.agentSpeakingElapsedMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(durationMs)
+        hasher.combine(wordCount)
+        hasher.combine(isEcho)
+        hasher.combine(agentSpeakingElapsedMs)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSpeechObservation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SpeechObservation {
+        return
+            try SpeechObservation(
+                durationMs: FfiConverterUInt32.read(from: &buf), 
+                wordCount: FfiConverterOptionUInt32.read(from: &buf), 
+                isEcho: FfiConverterBool.read(from: &buf), 
+                agentSpeakingElapsedMs: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SpeechObservation, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.durationMs, into: &buf)
+        FfiConverterOptionUInt32.write(value.wordCount, into: &buf)
+        FfiConverterBool.write(value.isEcho, into: &buf)
+        FfiConverterOptionUInt32.write(value.agentSpeakingElapsedMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSpeechObservation_lift(_ buf: RustBuffer) throws -> SpeechObservation {
+    return try FfiConverterTypeSpeechObservation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSpeechObservation_lower(_ value: SpeechObservation) -> RustBuffer {
+    return FfiConverterTypeSpeechObservation.lower(value)
 }
 
 
@@ -7441,6 +8760,87 @@ extension AudioRouteChangeReason: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * The verdict.
+ */
+
+public enum AutoResolution {
+    
+    /**
+     * Run this rung on-device.
+     */
+    case local(modelId: String
+    )
+    /**
+     * Serve from the cloud fallback. `download_target` names the rung the
+     * shell should be fetching, when fetching would change the outcome.
+     */
+    case cloud(reason: CloudFallbackReason, downloadTarget: String?
+    )
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAutoResolution: FfiConverterRustBuffer {
+    typealias SwiftType = AutoResolution
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AutoResolution {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .local(modelId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .cloud(reason: try FfiConverterTypeCloudFallbackReason.read(from: &buf), downloadTarget: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: AutoResolution, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .local(modelId):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(modelId, into: &buf)
+            
+        
+        case let .cloud(reason,downloadTarget):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypeCloudFallbackReason.write(reason, into: &buf)
+            FfiConverterOptionString.write(downloadTarget, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAutoResolution_lift(_ buf: RustBuffer) throws -> AutoResolution {
+    return try FfiConverterTypeAutoResolution.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAutoResolution_lower(_ value: AutoResolution) -> RustBuffer {
+    return FfiConverterTypeAutoResolution.lower(value)
+}
+
+
+
+extension AutoResolution: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * Container background. Mirrors Meta `FlexBoxBackground` (`Card` = the visible
  * dark-gray surface; `None` = transparent / additive-passthrough).
  */
@@ -8177,6 +9577,105 @@ extension CaptureVideoResult: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * Why the cloud is serving instead of a local rung. Surfaced in the event
+ * log — "I chose Auto and don't know where my audio went" is the one
+ * outcome this feature must never produce.
+ */
+
+public enum CloudFallbackReason {
+    
+    /**
+     * No Auto-eligible rung fits this device class. The phone is too small
+     * for a local brain worth shipping.
+     */
+    case belowQualityFloor
+    /**
+     * The device class earns a rung, but memory is too tight right now for
+     * any eligible rung. Transient — a later session may resolve local.
+     */
+    case insufficientMemoryNow
+    /**
+     * The resolved rung's weights are not on disk yet. The expected state
+     * for every new user: cloud serves until their download lands.
+     */
+    case weightsNotPresent
+    /**
+     * The shell reported no Auto-eligible rungs at all (local tier not
+     * registered, or an empty catalog).
+     */
+    case noEligibleRungs
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCloudFallbackReason: FfiConverterRustBuffer {
+    typealias SwiftType = CloudFallbackReason
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CloudFallbackReason {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .belowQualityFloor
+        
+        case 2: return .insufficientMemoryNow
+        
+        case 3: return .weightsNotPresent
+        
+        case 4: return .noEligibleRungs
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: CloudFallbackReason, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .belowQualityFloor:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .insufficientMemoryNow:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .weightsNotPresent:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .noEligibleRungs:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCloudFallbackReason_lift(_ buf: RustBuffer) throws -> CloudFallbackReason {
+    return try FfiConverterTypeCloudFallbackReason.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCloudFallbackReason_lower(_ value: CloudFallbackReason) -> RustBuffer {
+    return FfiConverterTypeCloudFallbackReason.lower(value)
+}
+
+
+
+extension CloudFallbackReason: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * Raw video-stream codec. `Raw` is Android-only today; iOS gains it (a
  * harmless extra case).
  */
@@ -8360,6 +9859,529 @@ public func FfiConverterTypeConnectError_lower(_ value: ConnectError) -> RustBuf
 
 
 extension ConnectError: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Instructions returned as data; the shell executes them in order.
+ */
+
+public enum ConversationEffect {
+    
+    /**
+     * Transcribe the most recently completed utterance.
+     */
+    case transcribe
+    /**
+     * Start the brain on this user turn.
+     */
+    case beginInference(text: String
+    )
+    /**
+     * Abort the in-flight inference (native abort; tools are never
+     * half-cancelled — that contract lives in the brain executor).
+     */
+    case cancelInference
+    /**
+     * Render this text. Consecutive `Speak` effects without an intervening
+     * `CancelSpeech` are ONE logical utterance rendered as a serial queue
+     * (streamed chunks): the mouth appends, reports `SpeechCompleted` once
+     * PER SEGMENT, and `CancelSpeech` clears the whole queue.
+     */
+    case speak(text: String
+    )
+    /**
+     * Stop the active utterance now.
+     */
+    case cancelSpeech
+    /**
+     * Arm a timer.
+     */
+    case scheduleTimer(timer: ConversationTimer, ms: UInt32
+    )
+    /**
+     * Disarm a timer (idempotent shell-side).
+     */
+    case cancelTimer(timer: ConversationTimer
+    )
+    /**
+     * The silence timeout elapsed with nobody speaking: the shell puts the
+     * session to sleep (client sleep() → disconnect → Stop → wentDormant —
+     * identical to the cloud provider's onSilenceTimeout path).
+     */
+    case requestSleep
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeConversationEffect: FfiConverterRustBuffer {
+    typealias SwiftType = ConversationEffect
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConversationEffect {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .transcribe
+        
+        case 2: return .beginInference(text: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .cancelInference
+        
+        case 4: return .speak(text: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 5: return .cancelSpeech
+        
+        case 6: return .scheduleTimer(timer: try FfiConverterTypeConversationTimer.read(from: &buf), ms: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 7: return .cancelTimer(timer: try FfiConverterTypeConversationTimer.read(from: &buf)
+        )
+        
+        case 8: return .requestSleep
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ConversationEffect, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .transcribe:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .beginInference(text):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(text, into: &buf)
+            
+        
+        case .cancelInference:
+            writeInt(&buf, Int32(3))
+        
+        
+        case let .speak(text):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(text, into: &buf)
+            
+        
+        case .cancelSpeech:
+            writeInt(&buf, Int32(5))
+        
+        
+        case let .scheduleTimer(timer,ms):
+            writeInt(&buf, Int32(6))
+            FfiConverterTypeConversationTimer.write(timer, into: &buf)
+            FfiConverterUInt32.write(ms, into: &buf)
+            
+        
+        case let .cancelTimer(timer):
+            writeInt(&buf, Int32(7))
+            FfiConverterTypeConversationTimer.write(timer, into: &buf)
+            
+        
+        case .requestSleep:
+            writeInt(&buf, Int32(8))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationEffect_lift(_ buf: RustBuffer) throws -> ConversationEffect {
+    return try FfiConverterTypeConversationEffect.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationEffect_lower(_ value: ConversationEffect) -> RustBuffer {
+    return FfiConverterTypeConversationEffect.lower(value)
+}
+
+
+
+extension ConversationEffect: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Facts from the outside world. `SpeechStarted` means the interruption
+ * classifier already ruled the speech genuine (echo, sub-threshold
+ * fragments, and backchannels never reach the machine as events).
+ */
+
+public enum ConversationEvent {
+    
+    /**
+     * Session wake — begin the loop.
+     */
+    case start
+    /**
+     * Sleep / session end — from any state.
+     */
+    case stop
+    /**
+     * Classified user speech onset.
+     */
+    case speechStarted
+    /**
+     * The segmenter completed an utterance (audio captured shell-side).
+     */
+    case utteranceFinished
+    /**
+     * Transcription result; empty text = nothing usable (never a turn).
+     */
+    case transcriptReady(text: String
+    )
+    /**
+     * Brain terminal: speak this reply.
+     */
+    case replyReady(text: String
+    )
+    /**
+     * Brain terminal: nothing to say.
+     */
+    case replySilent
+    /**
+     * A speakable segment of a STREAMED reply (sentence-boundary chunks);
+     * more may follow. First chunk moves THINKING → SPEAKING, so the mouth
+     * starts while the brain is still generating — the latency lever.
+     * Shell contract: brain events are fed ONLY from the live generation
+     * (the executor gates by task identity after a `CancelInference`) —
+     * the machine cannot distinguish a straggler from a cancelled stream
+     * once a NEW inference is in flight.
+     */
+    case replyChunk(text: String
+    )
+    /**
+     * A streamed reply's generation ended; no more chunks. In THINKING
+     * (zero chunks emitted) this is a silent reply.
+     */
+    case replyFinished
+    /**
+     * The mouth finished (completion, failure, and shell-side timeout all
+     * look the same to the loop).
+     */
+    case speechCompleted
+    /**
+     * App-driven speech (`say()` / greeting) — goes THROUGH the machine so
+     * single-owner speech holds for every utterance in the session.
+     */
+    case speakRequested(text: String
+    )
+    /**
+     * A shell timer fired.
+     */
+    case timerFired(timer: ConversationTimer
+    )
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeConversationEvent: FfiConverterRustBuffer {
+    typealias SwiftType = ConversationEvent
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConversationEvent {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .start
+        
+        case 2: return .stop
+        
+        case 3: return .speechStarted
+        
+        case 4: return .utteranceFinished
+        
+        case 5: return .transcriptReady(text: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 6: return .replyReady(text: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 7: return .replySilent
+        
+        case 8: return .replyChunk(text: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 9: return .replyFinished
+        
+        case 10: return .speechCompleted
+        
+        case 11: return .speakRequested(text: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 12: return .timerFired(timer: try FfiConverterTypeConversationTimer.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ConversationEvent, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .start:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .stop:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .speechStarted:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .utteranceFinished:
+            writeInt(&buf, Int32(4))
+        
+        
+        case let .transcriptReady(text):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(text, into: &buf)
+            
+        
+        case let .replyReady(text):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(text, into: &buf)
+            
+        
+        case .replySilent:
+            writeInt(&buf, Int32(7))
+        
+        
+        case let .replyChunk(text):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(text, into: &buf)
+            
+        
+        case .replyFinished:
+            writeInt(&buf, Int32(9))
+        
+        
+        case .speechCompleted:
+            writeInt(&buf, Int32(10))
+        
+        
+        case let .speakRequested(text):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(text, into: &buf)
+            
+        
+        case let .timerFired(timer):
+            writeInt(&buf, Int32(12))
+            FfiConverterTypeConversationTimer.write(timer, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationEvent_lift(_ buf: RustBuffer) throws -> ConversationEvent {
+    return try FfiConverterTypeConversationEvent.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationEvent_lower(_ value: ConversationEvent) -> RustBuffer {
+    return FfiConverterTypeConversationEvent.lower(value)
+}
+
+
+
+extension ConversationEvent: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * The loop's five states. `Transcribing` exists even for streaming
+ * segmenters (which may deliver `TranscriptReady` straight from
+ * `Listening`) — batch transcribers pass through it.
+ */
+
+public enum ConversationState {
+    
+    /**
+     * Dormant. Only `Start` does anything.
+     */
+    case idle
+    /**
+     * Ears open, nothing in flight.
+     */
+    case listening
+    /**
+     * An utterance ended; the transcriber is turning it into text.
+     */
+    case transcribing
+    /**
+     * The brain is producing a reply (the tool loop runs inside this state,
+     * invisible to the machine — the brain executor reports the terminal).
+     */
+    case thinking
+    /**
+     * The mouth is rendering the single active reply.
+     */
+    case speaking
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeConversationState: FfiConverterRustBuffer {
+    typealias SwiftType = ConversationState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConversationState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .idle
+        
+        case 2: return .listening
+        
+        case 3: return .transcribing
+        
+        case 4: return .thinking
+        
+        case 5: return .speaking
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ConversationState, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .idle:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .listening:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .transcribing:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .thinking:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .speaking:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationState_lift(_ buf: RustBuffer) throws -> ConversationState {
+    return try FfiConverterTypeConversationState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationState_lower(_ value: ConversationState) -> RustBuffer {
+    return FfiConverterTypeConversationState.lower(value)
+}
+
+
+
+extension ConversationState: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Timer identities (the machine owns no clock).
+ */
+
+public enum ConversationTimer {
+    
+    /**
+     * Armed while LISTENING when the session has a silence timeout
+     * (AssistantConfig.silenceTimeout — the same contract the cloud
+     * provider honors). Re-armed on user speech; cancelled on leaving
+     * LISTENING; firing yields `RequestSleep`.
+     */
+    case silence
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeConversationTimer: FfiConverterRustBuffer {
+    typealias SwiftType = ConversationTimer
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConversationTimer {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .silence
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ConversationTimer, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .silence:
+            writeInt(&buf, Int32(1))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationTimer_lift(_ buf: RustBuffer) throws -> ConversationTimer {
+    return try FfiConverterTypeConversationTimer.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationTimer_lower(_ value: ConversationTimer) -> RustBuffer {
+    return FfiConverterTypeConversationTimer.lower(value)
+}
+
+
+
+extension ConversationTimer: Equatable, Hashable {}
 
 
 
@@ -8825,7 +10847,18 @@ public enum DeviceType {
      */
     case metaGlasses
     case metaOrion
-    case mentraG1
+    /**
+     * Android XR projected audio glasses (vendor `android_xr`; the fall-2026
+     * Samsung-built line — camera + mic + speaker, no display). Preview: no
+     * shipping hardware yet; produced by the `:glasses-xr` ProjectedXrTransport.
+     */
+    case androidXrAudioGlasses
+    /**
+     * Android XR projected display glasses (vendor `android_xr`; the rumored
+     * 2027 display follow-on — adds a Glimmer display). Preview identity only;
+     * no transport produces it yet.
+     */
+    case androidXrDisplayGlasses
     case unknown
 }
 
@@ -8854,9 +10887,11 @@ public struct FfiConverterTypeDeviceType: FfiConverterRustBuffer {
         
         case 7: return .metaOrion
         
-        case 8: return .mentraG1
+        case 8: return .androidXrAudioGlasses
         
-        case 9: return .unknown
+        case 9: return .androidXrDisplayGlasses
+        
+        case 10: return .unknown
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -8894,12 +10929,16 @@ public struct FfiConverterTypeDeviceType: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
         
         
-        case .mentraG1:
+        case .androidXrAudioGlasses:
             writeInt(&buf, Int32(8))
         
         
-        case .unknown:
+        case .androidXrDisplayGlasses:
             writeInt(&buf, Int32(9))
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(10))
         
         }
     }
@@ -9572,6 +11611,78 @@ public func FfiConverterTypeEndpointChannel_lower(_ value: EndpointChannel) -> R
 
 
 extension EndpointChannel: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum EndpointVerdict {
+    
+    /**
+     * Keep listening. (Named to avoid Swift's `continue` keyword in the
+     * generated bindings.)
+     */
+    case hold
+    /**
+     * Finish the utterance now (the shell ends audio so the recognizer
+     * delivers its FINAL).
+     */
+    case finalize
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEndpointVerdict: FfiConverterRustBuffer {
+    typealias SwiftType = EndpointVerdict
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EndpointVerdict {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .hold
+        
+        case 2: return .finalize
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: EndpointVerdict, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .hold:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .finalize:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEndpointVerdict_lift(_ buf: RustBuffer) throws -> EndpointVerdict {
+    return try FfiConverterTypeEndpointVerdict.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEndpointVerdict_lower(_ value: EndpointVerdict) -> RustBuffer {
+    return FfiConverterTypeEndpointVerdict.lower(value)
+}
+
+
+
+extension EndpointVerdict: Equatable, Hashable {}
 
 
 
@@ -10296,6 +12407,76 @@ public func FfiConverterTypeIndicatorRole_lower(_ value: IndicatorRole) -> RustB
 
 
 extension IndicatorRole: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum InterruptionVerdict {
+    
+    /**
+     * Feed `SpeechStarted` to the loop — this speech takes the floor.
+     */
+    case interrupt
+    /**
+     * Not an interruption (echo / blip / backchannel) — no loop event.
+     */
+    case ignore
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeInterruptionVerdict: FfiConverterRustBuffer {
+    typealias SwiftType = InterruptionVerdict
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> InterruptionVerdict {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .interrupt
+        
+        case 2: return .ignore
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: InterruptionVerdict, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .interrupt:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .ignore:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInterruptionVerdict_lift(_ buf: RustBuffer) throws -> InterruptionVerdict {
+    return try FfiConverterTypeInterruptionVerdict.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInterruptionVerdict_lower(_ value: InterruptionVerdict) -> RustBuffer {
+    return FfiConverterTypeInterruptionVerdict.lower(value)
+}
+
+
+
+extension InterruptionVerdict: Equatable, Hashable {}
 
 
 
@@ -12626,6 +14807,13 @@ public enum TransportChosen {
     case realMeta
     case browserSim
     case localSim
+    /**
+     * Android XR projected transport (`:glasses-xr` ProjectedXrTransport,
+     * vendor `android_xr`). Preview — resolves only when the host app
+     * explicitly registered the XR module AND a projected device
+     * association exists.
+     */
+    case projectedXr
 }
 
 
@@ -12645,6 +14833,8 @@ public struct FfiConverterTypeTransportChosen: FfiConverterRustBuffer {
         
         case 3: return .localSim
         
+        case 4: return .projectedXr
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -12663,6 +14853,10 @@ public struct FfiConverterTypeTransportChosen: FfiConverterRustBuffer {
         
         case .localSim:
             writeInt(&buf, Int32(3))
+        
+        
+        case .projectedXr:
+            writeInt(&buf, Int32(4))
         
         }
     }
@@ -12932,6 +15126,13 @@ public enum TransportSelectionSource {
     case fallbackDefault
     case explicitConfig
     case pairing
+    /**
+     * A host-registered vendor transport factory claimed the connection
+     * (vendor axis: e.g. `ExtentosXr.register()` + a live projected
+     * device association). Registration is explicit opt-in, so an
+     * unregistered build can never resolve here.
+     */
+    case vendorRegistry
 }
 
 
@@ -12956,6 +15157,8 @@ public struct FfiConverterTypeTransportSelectionSource: FfiConverterRustBuffer {
         case 5: return .explicitConfig
         
         case 6: return .pairing
+        
+        case 7: return .vendorRegistry
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -12987,6 +15190,10 @@ public struct FfiConverterTypeTransportSelectionSource: FfiConverterRustBuffer {
         
         case .pairing:
             writeInt(&buf, Int32(6))
+        
+        
+        case .vendorRegistry:
+            writeInt(&buf, Int32(7))
         
         }
     }
@@ -16092,6 +18299,31 @@ fileprivate struct FfiConverterSequenceTypeGatewayAuthHeader: FfiConverterRustBu
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeLocalRung: FfiConverterRustBuffer {
+    typealias SwiftType = [LocalRung]
+
+    public static func write(_ value: [LocalRung], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeLocalRung.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LocalRung] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [LocalRung]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeLocalRung.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeRealtimeToolDef: FfiConverterRustBuffer {
     typealias SwiftType = [RealtimeToolDef]
 
@@ -16159,6 +18391,31 @@ fileprivate struct FfiConverterSequenceTypeVoiceHint: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeVoiceHint.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeConversationEffect: FfiConverterRustBuffer {
+    typealias SwiftType = [ConversationEffect]
+
+    public static func write(_ value: [ConversationEffect], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeConversationEffect.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ConversationEffect] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ConversationEffect]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeConversationEffect.read(from: &buf))
         }
         return seq
     }
@@ -16427,6 +18684,24 @@ public func audioStreamGateOpen(privacyRaw: String?, audioEnabledRaw: String?) -
 })
 }
 /**
+ * The cloud model Auto falls back to when no local rung serves.
+ */
+public func autoCloudFallbackModel() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_auto_cloud_fallback_model($0
+    )
+})
+}
+/**
+ * The id that means "resolve for me" (`local-auto`).
+ */
+public func autoModelId() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_auto_model_id($0
+    )
+})
+}
+/**
  * Icon token (both shells map tokens → their icon sets).
  */
 public func capabilityIconToken(kind: DeclaredCapability) -> String {
@@ -16448,10 +18723,10 @@ public func capabilityLabel(kind: DeclaredCapability) -> String {
 }
 /**
  * Identity-derived profile for a known device type. Must stay aligned with
- * `device-registry/glasses-models.json` (`display` flags) — the sim path
+ * `device-registry/glasses-models.json` (capability sets) — the sim path
  * resolves capability from that catalog over the wire; this is the DAT
- * (real-hardware) path's source. Orion and Mentra G1 aren't in the sim
- * catalog but are display hardware; `Unknown` never claims a screen.
+ * (real-hardware) path's source. Orion isn't in the sim catalog but is
+ * display hardware; `Unknown` never claims a screen.
  */
 public func capabilityProfileForDevice(device: DeviceType) -> DeviceCapabilitySet {
     return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
@@ -16662,12 +18937,38 @@ public func debugSessionInitFrame(clientId: String, deviceInstallId: String?, pr
 })
 }
 /**
+ * Exported so the LOCAL provider composes the SAME note the realtime core
+ * injects (model-facing strings live once — protocol rule).
+ */
+public func defaultDeviceInfoNote() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_default_device_info_note($0
+    )
+})
+}
+/**
  * The default wake-greeting directive (`Greeting.DEFAULT_DIRECTIVE` on the
  * shells). Exposed so apps can build on it.
  */
 public func defaultGreetingDirective() -> String {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_default_greeting_directive($0
+    )
+})
+}
+public func deviceInfoToolDescription() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_device_info_tool_description($0
+    )
+})
+}
+/**
+ * Exported for the LOCAL provider's built-in tool injection (name +
+ * description must match the cloud path byte-for-byte).
+ */
+public func deviceInfoToolName() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_device_info_tool_name($0
     )
 })
 }
@@ -16683,6 +18984,20 @@ public func devicePageLabel(modelId: String?) -> String? {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_device_page_label(
         FfiConverterOptionString.lower(modelId),$0
+    )
+})
+}
+/**
+ * Vendor wire id for a device identity — the vendor half of the identity
+ * dial (`DeviceInfo.vendor` vocabulary; canonical tokens `"meta"` /
+ * `"android_xr"`, decided 2026-07-24). Lives beside [`device_type_wire_id`]
+ * so a new variant cannot ship without declaring its vendor; both shells
+ * derive vendor identity from this instead of hardcoding `"meta"`.
+ */
+public func deviceTypeVendor(deviceType: DeviceType) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_device_type_vendor(
+        FfiConverterTypeDeviceType.lower(deviceType),$0
     )
 })
 }
@@ -16884,6 +19199,24 @@ public func listeningOnDefaultTrue(rawJson: String?) -> Bool {
 })
 }
 /**
+ * The conduct floor prepended to (developer) instructions for LOCAL models.
+ */
+public func localConductFloor() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_local_conduct_floor($0
+    )
+})
+}
+/**
+ * The instructions used when the developer wrote none (local models).
+ */
+public func localDefaultInstructions() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_local_default_instructions($0
+    )
+})
+}
+/**
  * The WARN for the video(clip)/image sole-surface case when sibling nodes
  * were declared alongside it (the siblings are what get ignored).
  */
@@ -16938,10 +19271,9 @@ public func memoryProfileRender(profileJson: String?) -> String? {
 })
 }
 /**
- * The Meta-lineup capability profile: camera/microphone/speaker are true
- * across every current model (the pairing floor); display is the one live
- * dial. The shells feed `display_capable` from the transport — this was
- * duplicated twice in the Kotlin root before the hoist.
+ * The Meta-lineup capability profile. Kept as a stable export for existing
+ * shell call sites (iOS still calls it — migration ledger item); new code
+ * routes through [`vendor_capability_profile`] with the transport's vendor.
  */
 public func metaCapabilityProfile(displayCapable: Bool) -> DeviceCapabilitySet {
     return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
@@ -17033,6 +19365,21 @@ public func resolveAudioGate(privacyRaw: String?, audioEnabledRaw: String?) -> S
 })
 }
 /**
+ * Resolve `local-auto` for one session.
+ *
+ * Deterministic for a given (ladder, device class): the only input that can
+ * vary run to run is `available_now_mb`, and it can only ever step the
+ * answer DOWN the eligible ladder or out to the cloud.
+ */
+public func resolveAutoModel(ladder: [LocalRung], device: DeviceMemory) -> AutoResolution {
+    return try!  FfiConverterTypeAutoResolution.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_resolve_auto_model(
+        FfiConverterSequenceTypeLocalRung.lower(ladder),
+        FfiConverterTypeDeviceMemory.lower(device),$0
+    )
+})
+}
+/**
  * The toggle currently gating CAMERA capture, or None when allowed.
  * privacy_mode is checked FIRST (the user-facing intent "I want
  * everything off" is more general than "no camera"). The returned name
@@ -17114,6 +19461,23 @@ public func transcriptionGateOpen(privacyRaw: String?, audioEnabledRaw: String?,
     )
 })
 }
+/**
+ * Vendor-routed capability profile — the vendor axis of the capability dial
+ * (canonical vendor tokens `"meta"` / `"android_xr"`, decided 2026-07-24).
+ * The shells feed the transport's vendor id + the live `display_capable`
+ * dial; the per-vendor floors live HERE, once, instead of a Meta floor
+ * hardcoded at every shell edge. A new vendor adds an arm (its Phase-1
+ * capability-mapping table decides the values) — shell call sites don't
+ * change.
+ */
+public func vendorCapabilityProfile(vendor: String, displayCapable: Bool) -> DeviceCapabilitySet {
+    return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_vendor_capability_profile(
+        FfiConverterString.lower(vendor),
+        FfiConverterBool.lower(displayCapable),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -17163,13 +19527,19 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_audio_stream_gate_open() != 11753) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_auto_cloud_fallback_model() != 8660) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_auto_model_id() != 23039) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_capability_icon_token() != 25581) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_capability_label() != 7687) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_func_capability_profile_for_device() != 59790) {
+    if (uniffi_extentos_core_checksum_func_capability_profile_for_device() != 54016) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_capability_wire_id() != 40381) {
@@ -17217,10 +19587,22 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_debug_session_init_frame() != 44087) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_default_device_info_note() != 49078) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_default_greeting_directive() != 21853) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_device_info_tool_description() != 27387) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_device_info_tool_name() != 4519) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_device_page_label() != 14399) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_device_type_vendor() != 24465) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_device_type_wire_id() != 58358) {
@@ -17268,6 +19650,12 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_listening_on_default_true() != 46971) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_local_conduct_floor() != 22783) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_local_default_instructions() != 12607) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_local_media_siblings_dropped_warn() != 40223) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -17280,7 +19668,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_memory_profile_render() != 33376) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_func_meta_capability_profile() != 46161) {
+    if (uniffi_extentos_core_checksum_func_meta_capability_profile() != 62051) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_normalize_display_root() != 59593) {
@@ -17301,6 +19689,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_resolve_audio_gate() != 28622) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_resolve_auto_model() != 42062) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_resolve_camera_gate() != 17518) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -17317,6 +19708,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_transcription_gate_open() != 36844) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_vendor_capability_profile() != 33771) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_abort_capture_video() != 30615) {
@@ -17338,6 +19732,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_device_model_id() != 1052) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_browsersimcore_device_vendor() != 64841) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_disconnect() != 24983) {
@@ -17400,6 +19797,24 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_browsersimcore_stop_video_stream() != 29373) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_method_conversationloop_handle() != 37171) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_conversationloop_set_silence_timeout_ms() != 49297) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_conversationloop_state() != 17076) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_endpointdecider_note_partial() != 3945) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_endpointdecider_reset() != 14920) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_endpointdecider_tick() != 18876) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_method_hostedmediaregistry_forget() != 32267) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -17410,6 +19825,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_hostedmediaregistry_snapshot_json() != 60723) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_interruptionclassifier_classify() != 40206) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realmetacore_abort_capture_video() != 29410) {
@@ -17616,6 +20034,12 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_soundregistry_resolve() != 60809) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_method_speechruntracker_reset() != 5811) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_speechruntracker_tick() != 34816) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_method_voicecore_cancel_registration() != 46879) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -17634,10 +20058,19 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_constructor_browsersimcore_new() != 31454) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_constructor_conversationloop_new() != 33510) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_constructor_endpointdecider_new() != 28684) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_constructor_hostedmediaregistry_new() != 50721) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_constructor_hostedmediaregistry_restore() != 29186) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_constructor_interruptionclassifier_new() != 22810) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_constructor_realmetacore_new() != 39964) {
@@ -17647,6 +20080,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_constructor_soundregistry_new() != 1485) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_constructor_speechruntracker_new() != 36083) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_constructor_voicecore_new() != 54580) {

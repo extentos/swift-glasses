@@ -91,7 +91,8 @@ extension AssistantConfig {
             greeting: greeting,
             wakeSoundEnabled: wakeSoundEnabled,
             includeDeviceInfoTool: includeDeviceInfoTool,
-            deviceInfoNote: deviceInfoNote
+            deviceInfoNote: deviceInfoNote,
+            localConductFloor: localConductFloor
         )
     }
 
@@ -122,7 +123,8 @@ extension AssistantConfig {
             greeting: greeting,
             wakeSoundEnabled: wakeSoundEnabled,
             includeDeviceInfoTool: includeDeviceInfoTool,
-            deviceInfoNote: deviceInfoNote
+            deviceInfoNote: deviceInfoNote,
+            localConductFloor: localConductFloor
         )
     }
 }

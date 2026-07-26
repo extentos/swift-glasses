@@ -24,8 +24,8 @@ let package = Package(
         // universal arm64/x86_64 simulator slice + macOS arm64).
         .binaryTarget(
             name: "extentos_coreFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/1.9.0/extentos_coreFFI.xcframework.zip",
-            checksum: "ba6b13b87319793f19f6a95d6a344f4139c93265a604fe553abb3a9cbd16c65e"
+            url: "https://github.com/extentos/swift-glasses/releases/download/1.10.0/extentos_coreFFI.xcframework.zip",
+            checksum: "1c734b8d8fe0592405ff40d03acfed0686f11f297a7b491f14554c4f61e31438"
         ),
         .target(
             name: "GlassesCore",

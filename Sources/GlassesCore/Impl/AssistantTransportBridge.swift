@@ -115,6 +115,30 @@ internal final class AssistantTransportBridge: @unchecked Sendable {
                 "kind": kind,
                 "message": message,
             ]
+        case .autoModelResolved(let servedModelId, let isLocal, let cloudReason, let downloadTarget):
+            return [
+                "type": "assistant.auto_model_resolved",
+                "served_model_id": servedModelId,
+                "is_local": isLocal,
+                "cloud_reason": cloudReason.map { Self.frameName(for: $0) } as Any? ?? NSNull(),
+                "download_target": downloadTarget as Any? ?? NSNull(),
+            ]
+        }
+    }
+
+    /// Snake_case wire name for a cloud-fallback reason.
+    ///
+    /// Spelled out rather than derived: Swift's generated cases are camelCase
+    /// (`belowQualityFloor`) while Kotlin's are SCREAMING_SNAKE lowercased to
+    /// `below_quality_floor`. `String(describing:)` would silently emit the
+    /// camelCase spelling and break this file's byte-for-byte contract with
+    /// Android's `buildFrame`.
+    private static func frameName(for reason: CloudFallbackReason) -> String {
+        switch reason {
+        case .belowQualityFloor: return "below_quality_floor"
+        case .insufficientMemoryNow: return "insufficient_memory_now"
+        case .weightsNotPresent: return "weights_not_present"
+        case .noEligibleRungs: return "no_eligible_rungs"
         }
     }
 

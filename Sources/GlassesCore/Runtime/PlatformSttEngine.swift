@@ -64,6 +64,18 @@ final class PlatformSttEngine {
     private var utteranceHadSpeech: Bool = false
     private var lastSpeechAtMs: Int64 = 0
     private var finishRequestedAtMs: Int64?
+    /// Wake-ledger marker: the first buffer after a (re)subscribe proves
+    /// the tap is actually delivering (the "alive but silent" failure's
+    /// discriminator).
+    private var firstBufferNoted = false
+    // Measurement-only (segmenter arc step 1) — observes, never decides.
+    private var meter = EarsMeter()
+    // Segmenter arc step 2 (EarsTuning-gated, default dark): the Rust
+    // deciders + the tape recorder. Deciders are created lazily and reset
+    // per recognition session; the tape spans the engine lifetime.
+    private var endpointDecider: EndpointDecider?
+    private var runTracker: SpeechRunTracker?
+    private let tape = EarsTape()
 
     init(audioInput: any AudioInputSubscribing, factory: any SttSessionFactory) {
         self.audioInput = audioInput
@@ -142,6 +154,27 @@ final class PlatformSttEngine {
         utteranceHadSpeech = false
         lastSpeechAtMs = 0
         finishRequestedAtMs = nil
+        if EarsTuning.shapedEndpointing {
+            if endpointDecider == nil {
+                // Rust `Default` values mirrored explicitly (uniffi records
+                // don't export defaults) — b16-provisional; the noisy tape
+                // re-tunes before the flag ever turns on.
+                endpointDecider = EndpointDecider(config: EndpointConfig(
+                    speechRmsThreshold: Self.speechRmsThreshold,
+                    baseSilenceMs: 900,
+                    fastSilenceMs: 450,
+                    fastMinWords: 3,
+                    partialStallMs: 400
+                ))
+            }
+            endpointDecider?.reset()
+        }
+        if EarsTuning.onsetBargeIn, runTracker == nil {
+            runTracker = SpeechRunTracker(config: OnsetConfig(
+                speechRmsThreshold: Self.speechRmsThreshold,
+                hangoverMs: 300
+            ))
+        }
 
         // Subscribe to the shared audio input *before* starting the
         // recognition session so we never lose the first buffers — the
@@ -150,6 +183,7 @@ final class PlatformSttEngine {
         // across recognition restarts (see teardownRecognition): it is
         // the engine's continuous mic stream, Vosk-parity with Android.
         if bufferSubscriptionId == nil {
+            firstBufferNoted = false
             let id = audioInput.subscribe { [weak self] buffer, _ in
                 guard let self else { return }
                 // Crossing thread boundary: the tap callback runs on the
@@ -175,6 +209,7 @@ final class PlatformSttEngine {
                 // Genuinely-terminal causes (mic permission revoked, no input
                 // hardware) keep failing here and just keep the retry loop
                 // idle-spinning at 1Hz.
+                WakeLedger.shared.note("stt: input subscribe FAILED — retrying")
                 scheduleInputRetry()
                 return
             }
@@ -185,11 +220,23 @@ final class PlatformSttEngine {
             config: config,
             onPartial: { [weak self] text, confidence in
                 guard let self else { return }
+                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                self.meter.notePartial(nowMs: nowMs)
+                // Shape only (word count) crosses to the decider/tape —
+                // the text itself never leaves the transcript stream.
+                let words = UInt32(text.split(separator: " ").count)
+                self.endpointDecider?.notePartial(nowMs: nowMs, words: words)
+                self.tape.notePartial(nowMs: nowMs, words: words)
                 self.onTranscript?(.partial(text: text, confidence: Double(confidence)))
             },
             onFinal: { [weak self] text, startMs, endMs, confidence in
                 guard let self else { return }
                 self.finishRequestedAtMs = nil
+                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                self.tape.noteFinal(nowMs: nowMs)
+                if let line = self.meter.noteFinal(nowMs: nowMs) {
+                    LocalTierDiagnostics.shared.record(line)
+                }
                 self.onTranscript?(.final(
                     text: text,
                     confidence: Double(confidence),
@@ -282,11 +329,33 @@ final class PlatformSttEngine {
     /// `silenceEndpointMs` of post-speech silence so Apple delivers the
     /// FINAL the wake matcher needs.
     private func endpointTick(rms: Double, nowMs: Int64) {
+        if !firstBufferNoted {
+            firstBufferNoted = true
+            WakeLedger.shared.note("stt: first buffer delivered")
+        }
         guard session != nil else { return }
+        tape.tick(rms: rms, nowMs: nowMs)
+        // Onset tracking runs on EVERY buffer — including the pending-final
+        // window, where a barge-in is still a barge-in.
+        if let tracker = runTracker {
+            EarsActivityHub.shared.postSpeechRun(tracker.tick(nowMs: nowMs, rms: rms))
+        }
         if let requestedAt = finishRequestedAtMs {
             if nowMs - requestedAt > Self.finalBackstopMs {
                 finishRequestedAtMs = nil
                 scheduleRestart()
+            }
+            return
+        }
+        if let line = meter.tick(rms: rms, nowMs: nowMs) {
+            LocalTierDiagnostics.shared.record(line)
+        }
+        if EarsTuning.shapedEndpointing, let decider = endpointDecider {
+            if decider.tick(nowMs: nowMs, rms: rms) == .finalize {
+                finishRequestedAtMs = nowMs
+                meter.noteEndpointFired(nowMs: nowMs)
+                tape.noteMark("endpoint", nowMs: nowMs)
+                session?.finishAudio()
             }
             return
         }
@@ -296,6 +365,8 @@ final class PlatformSttEngine {
         } else if utteranceHadSpeech, nowMs - lastSpeechAtMs >= Self.silenceEndpointMs {
             utteranceHadSpeech = false
             finishRequestedAtMs = nowMs
+            meter.noteEndpointFired(nowMs: nowMs)
+            tape.noteMark("endpoint", nowMs: nowMs)
             session?.finishAudio()
         }
     }

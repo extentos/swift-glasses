@@ -1241,11 +1241,17 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
 
     func speak(requestId: String, text: String, config: SpeakConfigWire) {
         let utterance = AVSpeechUtterance(string: text)
-        if let voice = config.voice {
-            utterance.voice = AVSpeechSynthesisVoice(identifier: voice)
-                ?? AVSpeechSynthesisVoice(language: "en-US")
+        if let voice = config.voice, let explicit = AVSpeechSynthesisVoice(identifier: voice) {
+            utterance.voice = explicit
         } else {
-            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+            // Voice rung 1 (doc 14 §2.4; Kokoro is rung 2): the bare
+            // language lookup returns the COMPACT robot voice unless the
+            // user changed system defaults. "System voice" now means the
+            // best NEURAL system voice the device has installed
+            // (premium > enhanced > default) — zero dependencies, still
+            // fully offline, and downloadable voices upgrade it for free.
+            utterance.voice = Self.bestInstalledVoice(language: "en-US")
+                ?? AVSpeechSynthesisVoice(language: "en-US")
         }
         utterance.rate = max(0.0, min(1.0, AVSpeechUtteranceDefaultSpeechRate * Float(config.rate)))
         utterance.pitchMultiplier = max(0.5, min(2.0, 1.0 + Float(config.pitch)))
@@ -1277,6 +1283,39 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
 
     func cancelSpeak() {
         speechSynthesizer.stopSpeaking(at: .immediate)
+    }
+
+    /// Best installed voice for the language: premium > enhanced > default
+    /// quality, exact language match over prefix match, identifier order as
+    /// the deterministic tiebreak. Cached after first resolution (the voice
+    /// inventory doesn't change mid-session) and noted once for
+    /// diagnosability.
+    private static let voiceLock = NSLock()
+    nonisolated(unsafe) private static var voiceCache: [String: AVSpeechSynthesisVoice] = [:]
+    static func bestInstalledVoice(language: String) -> AVSpeechSynthesisVoice? {
+        voiceLock.lock()
+        defer { voiceLock.unlock() }
+        if let hit = voiceCache[language] { return hit }
+        let prefix = language.prefix(2)
+        func rank(_ v: AVSpeechSynthesisVoice) -> (Int, Int, String) {
+            let quality: Int
+            switch v.quality {
+            case .premium: quality = 2
+            case .enhanced: quality = 1
+            default: quality = 0
+            }
+            return (quality, v.language == language ? 1 : 0, v.identifier)
+        }
+        let picked = AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.hasPrefix(prefix) }
+            .max { rank($0) < rank($1) }
+        if let picked {
+            let quality = picked.quality == .premium ? "premium"
+                : picked.quality == .enhanced ? "enhanced" : "default"
+            WakeLedger.shared.note("tts: voice \(picked.name) (\(quality))")
+            voiceCache[language] = picked
+        }
+        return picked
     }
 
     func earcon(sound: EarconSound, volume: Float) {

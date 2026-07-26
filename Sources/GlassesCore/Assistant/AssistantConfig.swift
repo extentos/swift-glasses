@@ -106,6 +106,20 @@ public struct AssistantConfig: Sendable {
     /// built-in note; "" → omit entirely.
     public let deviceInfoNote: String?
 
+    /// LOCAL models only: prepend Extentos's conversational conduct layer
+    /// beneath your instructions (the counterpart of the alignment layer
+    /// cloud vendors bake in — without it, small models treat a tool-heavy
+    /// prompt as their entire universe). Default ON; set false for raw
+    /// model behavior. Cloud models ignore this (their vendors provide it).
+    public let localConductFloor: Bool
+
+    /// Spoken VERBATIM as the wake acknowledgment whenever the composed
+    /// greeting is not ready in time — a cold wake (model still warming)
+    /// or a compose that overruns its latency budget. nil = the SDK's
+    /// default phrase. The wake ack must be instant, so this is a fixed
+    /// string by design, never a model call.
+    public let fallbackGreeting: String?
+
     public init(
         provider: AssistantProvider,
         instructions: String = "",
@@ -126,7 +140,9 @@ public struct AssistantConfig: Sendable {
         greeting: Greeting = .default,
         wakeSoundEnabled: Bool = true,
         includeDeviceInfoTool: Bool = true,
-        deviceInfoNote: String? = nil
+        deviceInfoNote: String? = nil,
+        localConductFloor: Bool = true,
+        fallbackGreeting: String? = nil
     ) {
         precondition(
             silenceTimeout.map { $0 > 0 } ?? true,
@@ -156,6 +172,8 @@ public struct AssistantConfig: Sendable {
         self.wakeSoundEnabled = wakeSoundEnabled
         self.includeDeviceInfoTool = includeDeviceInfoTool
         self.deviceInfoNote = deviceInfoNote
+        self.localConductFloor = localConductFloor
+        self.fallbackGreeting = fallbackGreeting
     }
 }
 
@@ -299,6 +317,13 @@ public final class AssistantConfigBuilder: @unchecked Sendable {
     /// Wake-confirmation chime on each wake.
     public var wakeSoundEnabled: Bool = true
 
+    /// LOCAL models: Extentos's conversational conduct layer beneath your
+    /// instructions (see AssistantConfig.localConductFloor). Default on.
+    public var localConductFloor: Bool = true
+    /// Fixed phrase for the instant wake ack when the composed greeting
+    /// can't land in time (cold wake / budget overrun). nil = SDK default.
+    public var fallbackGreeting: String? = nil
+
     private var onWakeHook: (@Sendable (any AssistantSession) async throws -> Void)?
     private var onSleepHook: (@Sendable (any AssistantSession) async throws -> Void)?
     private var silenceTimeoutValue: TimeInterval?
@@ -346,7 +371,9 @@ public final class AssistantConfigBuilder: @unchecked Sendable {
             memoryUserId: memoryUserId,
             memoryStore: memoryStore,
             greeting: greeting,
-            wakeSoundEnabled: wakeSoundEnabled
+            wakeSoundEnabled: wakeSoundEnabled,
+            localConductFloor: localConductFloor,
+            fallbackGreeting: fallbackGreeting
         )
     }
 }

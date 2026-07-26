@@ -41,9 +41,17 @@ extension AudioInputSubscribing {
 final class SharedAudioInput: AudioInputSubscribing, @unchecked Sendable {
     typealias BufferHandler = (AVAudioPCMBuffer, AVAudioTime) -> Void
 
+    /// Rebuild debounce: SCO/route negotiation fires configuration changes
+    /// in bursts; one rebuild after a short settle beats one per
+    /// notification (doc 18 §D).
+    static let rebuildSettleMs = 300
+    static let rebuildRetryMs = 1_000
+
     private let lock = NSLock()
     private var consumers: [UUID: BufferHandler] = [:]
     private var engine: AVAudioEngine?
+    private var observers: [NSObjectProtocol] = []
+    private var rebuildScheduled = false
     private let configureSession: () throws -> Void
     private let teardownSession: () -> Void
 
@@ -102,17 +110,6 @@ final class SharedAudioInput: AudioInputSubscribing, @unchecked Sendable {
         // Tap callback runs on a dedicated audio render thread. Snapshot
         // the consumer list under lock, then dispatch synchronously so the
         // buffer reference stays valid for every handler.
-        //
-        // KNOWN LIMITATION: this class does NOT observe
-        // `AVAudioEngineConfigurationChange` notifications. If the audio
-        // route changes mid-tap (user pulls AirPods, plugs in a headset,
-        // takes a call) AVAudioEngine may stop without restarting. The
-        // PlatformSttEngine's recoverable-error path will catch the STT
-        // side via SFSpeechRecognizer's error stream and restart the
-        // recognizer, but the underlying tap stays dead. Smoke test 6
-        // (PHASE_6_PLAN.md §7.3) catches this — fix is to add a
-        // NotificationCenter observer on `.AVAudioEngineConfigurationChange`
-        // that tears down + reinstalls the tap. Sprint 5 / follow-up.
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, when in
             guard let self else { return }
             self.lock.lock()
@@ -126,9 +123,109 @@ final class SharedAudioInput: AudioInputSubscribing, @unchecked Sendable {
         lock.lock()
         engine = e
         lock.unlock()
+        installObservers(for: e)
+        WakeLedger.shared.note(String(
+            format: "audio: engine started (%.0fHz ch%d)",
+            format.sampleRate, format.channelCount
+        ))
+    }
+
+    // ── Event-driven engine recovery (doc 18 §D — the fix for the
+    //    "subscription alive, tap dead" launch race) ─────────────────────
+    //
+    // AVAudioEngine can stop without restarting when the audio graph
+    // changes under it — and the glasses' Bluetooth HFP/SCO negotiation
+    // right after app launch is exactly such a change (measured: ~40 s of
+    // zero buffers on the b17 run; the b16-era first-wake failures). iOS
+    // announces every such change; reacting to the announcement replaces
+    // the retired silence-polling watchdog. Subscriber registrations
+    // survive a rebuild by construction — only the engine + tap recycle.
+
+    private func installObservers(for engine: AVAudioEngine) {
+        removeObservers()
+        var obs: [NSObjectProtocol] = []
+        let center = NotificationCenter.default
+        obs.append(center.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            self?.scheduleRebuild(reason: "engine configuration change")
+        })
+        #if os(iOS)
+        obs.append(center.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: nil
+        ) { [weak self] note in
+            guard
+                let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                AVAudioSession.InterruptionType(rawValue: raw) == .ended
+            else { return }
+            self?.scheduleRebuild(reason: "interruption ended")
+        })
+        #endif
+        lock.lock()
+        observers = obs
+        lock.unlock()
+    }
+
+    private func removeObservers() {
+        lock.lock()
+        let obs = observers
+        observers = []
+        lock.unlock()
+        for o in obs { NotificationCenter.default.removeObserver(o) }
+    }
+
+    private func scheduleRebuild(reason: String) {
+        lock.lock()
+        let wanted = !consumers.isEmpty && !rebuildScheduled
+        if wanted { rebuildScheduled = true }
+        lock.unlock()
+        guard wanted else { return }
+        DispatchQueue.global().asyncAfter(
+            deadline: .now() + .milliseconds(Self.rebuildSettleMs)
+        ) { [weak self] in
+            self?.performRebuild(reason: reason)
+        }
+    }
+
+    private func performRebuild(reason: String) {
+        lock.lock()
+        rebuildScheduled = false
+        let e = engine
+        engine = nil
+        let hasConsumers = !consumers.isEmpty
+        lock.unlock()
+        removeObservers()
+        if let e {
+            e.inputNode.removeTap(onBus: 0)
+            e.stop()
+        }
+        guard hasConsumers else {
+            teardownSession()
+            return
+        }
+        LocalTierDiagnostics.shared.record("audio: input engine rebuilt (\(reason))")
+        WakeLedger.shared.note("audio: engine rebuild (\(reason))")
+        do {
+            // Re-activates the session too — idempotent, and after a route
+            // change the fresh activation is the point.
+            try ensureRunning()
+        } catch {
+            // Activation right after a route change can throw and succeed
+            // moments later (2026-07-15 hardware finding) — keep retrying
+            // at ~1 Hz while consumers exist (mirrors PlatformSttEngine's
+            // input-retry posture; genuinely-terminal causes idle-spin).
+            NSLog("[Extentos] audio input rebuild failed (%@): %@", reason, String(describing: error))
+            WakeLedger.shared.note("audio: engine rebuild FAILED (\(error))")
+            DispatchQueue.global().asyncAfter(
+                deadline: .now() + .milliseconds(Self.rebuildRetryMs)
+            ) { [weak self] in
+                self?.scheduleRebuild(reason: "\(reason) — retry")
+            }
+        }
     }
 
     private func tearDown() {
+        removeObservers()
         lock.lock()
         let e = engine
         engine = nil

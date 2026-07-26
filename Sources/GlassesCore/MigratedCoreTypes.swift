@@ -55,6 +55,10 @@ public extension TransportChosen {
         case .realMeta: return "RealMeta"
         case .browserSim: return "BrowserSim"
         case .localSim: return "LocalSim"
+        // Android XR projected transport (vendor android_xr) — Android-only
+        // structurally (no iOS surface exists for this vendor); the case is
+        // mirrored so the shared vocabulary stays exhaustive on both shells.
+        case .projectedXr: return "ProjectedXr"
         }
     }
 }
@@ -68,6 +72,9 @@ public extension TransportSelectionSource {
         case .fallbackDefault: return "fallback_default"
         case .explicitConfig: return "explicit_config"
         case .pairing: return "pairing"
+        // Vendor-registry Auto arm (Android-only today) — mirrored for
+        // exhaustiveness; iOS Auto resolution never produces it.
+        case .vendorRegistry: return "vendor_registry"
         }
     }
 }

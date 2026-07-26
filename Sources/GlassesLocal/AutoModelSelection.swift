@@ -88,13 +88,23 @@ enum AutoModelSelection {
     private static func deviceMemory() -> DeviceMemory {
         let physicalMb = Int(ProcessInfo.processInfo.physicalMemory / (1024 * 1024))
         let classBudgetMb = Int(Double(physicalMb) * jetsamCeilingShare)
-        #if os(iOS)
-        let availableMb = Int(os_proc_available_memory()) / (1024 * 1024)
-        #else
-        // macOS (harness/dev only) has no per-process ceiling to read; the
-        // class budget is the honest stand-in so the resolver still runs.
+        // NO live-headroom guard on iOS, deliberately.
+        //
+        // os_proc_available_memory() reports what THIS PROCESS may still
+        // allocate, so it shrinks as the app itself allocates. Gating a
+        // model's full loaded footprint on it rejects models the device
+        // demonstrably runs: observed 2026-07-26 on an iPhone 12 with Qwen3
+        // 1.7B installed AND previously proven running offline, where the
+        // resolver returned insufficientMemoryNow and refused every rung.
+        // Android's `availMem` is system-wide free RAM and IS a meaningful
+        // "can I allocate this now" signal; iOS has no faithful analogue.
+        //
+        // Protection is not lost. LocalBrain enforces Config.requiredMemoryMb
+        // at LOAD time and refuses with a spoken reason — a truthful check at
+        // the moment it actually matters — and the jetsam ceiling is already
+        // encoded in classBudgetMb above. This guard was duplicating that
+        // badly, with the app's own footprint counted against the model.
         let availableMb = classBudgetMb
-        #endif
         return DeviceMemory(
             classBudgetMb: UInt64(max(0, classBudgetMb)),
             availableNowMb: UInt64(max(0, availableMb))
@@ -108,7 +118,7 @@ enum AutoModelSelection {
     /// non-empty snapshot directory. Anything less counts as absent, which
     /// fails toward the cloud and is the safe direction: serving from the
     /// gateway while a download lands is exactly Auto's intended behavior.
-    private static func weightsPresent(for dashboardId: String) -> Bool {
+    static func weightsPresent(for dashboardId: String) -> Bool {
         // MLX ids are "namespace/name" (e.g. mlx-community/Qwen3-1.7B-4bit);
         // Repo.ID takes the two halves separately.
         let repoPath = ExtentosLocalTier.brainConfig(for: dashboardId).modelId

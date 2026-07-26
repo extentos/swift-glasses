@@ -11,6 +11,7 @@
 
 import Foundation
 import GlassesCore
+import HuggingFace
 import os
 import MLXLMCommon
 
@@ -62,6 +63,121 @@ public enum ExtentosLocalTier {
         let available = 0
         #endif
         return DeviceFit(modelId: dashboardId, requiredMb: required, availableMb: available)
+    }
+
+    // ── Model management (Android ExtentosLocalTier parity) ───────────────
+    //
+    // Android has shipped models()/download()/delete() since the local tier
+    // landed; iOS had only register() + deviceFit(), so an app could not tell
+    // the user WHICH model their device needs, nor fetch it. That made the
+    // documented product path — end user deliberately downloads, then local
+    // AI works — unbuildable on iOS. These close that gap.
+    //
+    // Downloads stay APP-DRIVEN by design (doc 14 product requirement): the
+    // SDK never fetches weights on install or launch. Present size up front,
+    // show progress, and let the cloud serve until it lands.
+
+    /// A catalog rung with its install state on this device.
+    public struct LocalModelInfo: Sendable {
+        public let id: String
+        public let displayName: String
+        /// Estimated process memory the loaded model needs.
+        public let requiredMb: Int
+        /// Are the weights already in the Hub cache on this device?
+        public let isInstalled: Bool
+        /// May `local-auto` pick this rung? False = pinnable but never
+        /// automatic (below the tool-competence floor).
+        public let autoEligible: Bool
+    }
+
+    /// Human labels, mirroring the Android catalog's displayName values.
+    private static let displayNames: [String: String] = [
+        "local-qwen3-0.6b": "Qwen 3 Mini Local",
+        "local-qwen25-1.5b": "Qwen 2.5 Local",
+        "local-qwen3-1.7b": "Qwen 3 Local",
+        "local-qwen3-4b": "Qwen 3 4B Local",
+        "local-qwen3-8b": "Qwen 3 8B Local",
+    ]
+
+    /// The on-device catalog — the same ids the dashboard offers.
+    public static func models() -> [LocalModelInfo] {
+        requiredMb.keys.sorted { (requiredMb[$0] ?? 0) < (requiredMb[$1] ?? 0) }
+            .map { id in
+                LocalModelInfo(
+                    id: id,
+                    displayName: displayNames[id] ?? id,
+                    requiredMb: requiredMb[id] ?? 0,
+                    isInstalled: AutoModelSelection.weightsPresent(for: id),
+                    autoEligible: AutoModelSelection.autoEligibleIds.contains(id)
+                )
+            }
+    }
+
+    /// What `local-auto` resolves to on THIS device, right now.
+    ///
+    /// The app's cue for "your phone will use X — download it?". `modelId` is
+    /// nil when the cloud will serve; `downloadTarget` names the rung to fetch
+    /// when fetching would change that.
+    public struct AutoChoice: Sendable {
+        public let modelId: String?
+        public let isLocal: Bool
+        public let cloudReason: String?
+        public let downloadTarget: String?
+    }
+
+    public static func autoChoice() -> AutoChoice {
+        switch AutoModelSelection.resolve(servedRemotely: false) {
+        case .local(let modelId):
+            return AutoChoice(
+                modelId: modelId, isLocal: true, cloudReason: nil, downloadTarget: nil
+            )
+        case .cloud(let reason, let downloadTarget):
+            return AutoChoice(
+                modelId: nil,
+                isLocal: false,
+                cloudReason: String(describing: reason),
+                downloadTarget: downloadTarget
+            )
+        }
+    }
+
+    /// Fetch a model's weights into the Hub cache, reporting progress in
+    /// [0,1]. Call this ONLY from the end user's deliberate action.
+    ///
+    /// Implemented by warming a throwaway brain: the Hub downloads on first
+    /// load, and the instance is released immediately afterwards so the
+    /// weights stay on disk without holding ~1 GB resident — loading twice
+    /// concurrently is what jetsams a 4 GB phone.
+    public static func download(
+        modelId: String,
+        onProgress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws {
+        guard requiredMb[modelId] != nil else {
+            throw LocalTierError.unknownModel(modelId)
+        }
+        let brain = LocalBrain(config: brainConfig(for: modelId))
+        try await brain.warmUp(progress: onProgress)
+    }
+
+    /// Remove a downloaded model's weights from the Hub cache.
+    @discardableResult
+    public static func delete(modelId: String) throws -> Bool {
+        guard let repoPath = requiredMb[modelId] != nil
+            ? brainConfig(for: modelId).modelId : nil
+        else { return false }
+        let parts = repoPath.split(separator: "/", maxSplits: 1)
+        guard parts.count == 2 else { return false }
+        let dir = HubCache.default.repoDirectory(
+            repo: Repo.ID(namespace: String(parts[0]), name: String(parts[1])),
+            kind: .model
+        )
+        guard FileManager.default.fileExists(atPath: dir.path) else { return false }
+        try FileManager.default.removeItem(at: dir)
+        return true
+    }
+
+    public enum LocalTierError: Error, Sendable {
+        case unknownModel(String)
     }
 
     /// Dashboard id → per-model brain profile (weights + prompt protocol).

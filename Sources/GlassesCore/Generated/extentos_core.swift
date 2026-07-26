@@ -19092,6 +19092,27 @@ public func hostedMediaKey(uri: String) -> String {
 })
 }
 /**
+ * Kokoro speaker id for a configured voice id, or `None` when the id is not
+ * a Kokoro voice (e.g. "system", or a cloud provider's voice).
+ */
+public func kokoroSpeakerId(voiceId: String) -> UInt32? {
+    return try!  FfiConverterOptionUInt32.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_kokoro_speaker_id(
+        FfiConverterString.lower(voiceId),$0
+    )
+})
+}
+/**
+ * Every Kokoro voice id, ascending by speaker id. Lets a shell enumerate
+ * what it can serve without duplicating the table.
+ */
+public func kokoroVoiceIds() -> [String] {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_kokoro_voice_ids($0
+    )
+})
+}
+/**
  * The wire value a collapsed listening-mode switch writes back.
  */
 public func listeningModeWriteValue(on: Bool) -> String {
@@ -19540,6 +19561,12 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_hosted_media_key() != 20356) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_kokoro_speaker_id() != 44395) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_kokoro_voice_ids() != 2007) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_listening_mode_write_value() != 56908) {

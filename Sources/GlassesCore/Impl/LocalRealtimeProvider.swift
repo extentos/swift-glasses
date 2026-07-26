@@ -382,7 +382,7 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
     // ── Ears → events ────────────────────────────────────────────────────
 
     /// The onset path (EarsTuning.onsetBargeIn). Fires at most one machine
-    /// SpeechStarted per speech run. Cancel is final (RDQ #73): a run that
+    /// SpeechStarted per speech run. Cancel is final (RDQ #67): a run that
     /// produces no real transcript leaves the machine simply listening.
     private func onSpeechRun(_ runMs: UInt32) {
         guard isConnected() else { return }

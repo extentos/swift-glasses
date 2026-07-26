@@ -7,16 +7,33 @@ import PackageDescription
 
 let package = Package(
     name: "Extentos",
-    platforms: [.iOS(.v16), .macOS(.v13)],
+    // iOS 17 / macOS 14 because GlassesLocal pulls mlx-swift-lm, which declares
+    // those minimums, and SPM applies platform floors PACKAGE-WIDE — there is
+    // no way to keep one product at iOS 16 and ship another that needs 17.
+    // Raised from iOS 16 / macOS 13 when the local tier joined distribution.
+    platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
         .library(name: "GlassesCore", targets: ["GlassesCore"]),
         .library(name: "GlassesUI", targets: ["GlassesUI"]),
         .library(name: "GlassesDebug", targets: ["GlassesDebug"]),
         .library(name: "GlassesLifecycle", targets: ["GlassesLifecycle"]),
         .library(name: "GlassesTesting", targets: ["GlassesTesting"]),
+        // The on-device local tier (MLX brain) — what makes `local-*` models
+        // actually run on the phone rather than falling through to the cloud.
+        // A SEPARATE product so apps that don't opt in never link MLX/Metal:
+        // unlike an Android AAR, SPM only builds what you import, so the cost
+        // of shipping it here is the platform floor above, not binary weight.
+        .library(name: "GlassesLocal", targets: ["GlassesLocal"]),
     ],
     dependencies: [
         .package(url: "https://github.com/facebook/meta-wearables-dat-ios", from: "0.8.0"),
+        // MLX model serving for the on-device local tier (Apple platforms only).
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "3.31.4"),
+        // The #hubDownloader / #huggingFaceTokenizerLoader macros expand to
+        // HubClient / Tokenizers code the CONSUMER must import (mlx-swift-lm
+        // integrates by protocol, not by dependency).
+        .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.1.0"),
+        .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.0.0"),
     ],
     targets: [
         // Shared Rust core, compiled per-platform and shipped as a binary
@@ -24,8 +41,8 @@ let package = Package(
         // universal arm64/x86_64 simulator slice + macOS arm64).
         .binaryTarget(
             name: "extentos_coreFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/1.10.0/extentos_coreFFI.xcframework.zip",
-            checksum: "1c734b8d8fe0592405ff40d03acfed0686f11f297a7b491f14554c4f61e31438"
+            url: "https://github.com/extentos/swift-glasses/releases/download/1.10.1/extentos_coreFFI.xcframework.zip",
+            checksum: "a4b16033aac63f4b65447079ea59966becf2a74a377ff73bf069a8fd250c6f13"
         ),
         .target(
             name: "GlassesCore",
@@ -43,5 +60,19 @@ let package = Package(
         .target(name: "GlassesDebug", dependencies: ["GlassesCore"]),
         .target(name: "GlassesLifecycle", dependencies: ["GlassesCore"]),
         .target(name: "GlassesTesting", dependencies: ["GlassesCore"]),
+        .target(
+            name: "GlassesLocal",
+            dependencies: [
+                "GlassesCore",
+                .product(name: "MLXLLM", package: "mlx-swift-lm"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
+                .product(name: "HuggingFace", package: "swift-huggingface"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
+            ],
+            // Swift 5 language mode like GlassesCore: MLX's UserInput/Chat
+            // types are not Sendable-annotated yet.
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

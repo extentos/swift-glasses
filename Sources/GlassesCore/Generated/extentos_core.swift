@@ -651,15 +651,6 @@ public protocol BrowserSimCoreProtocol : AnyObject {
     func deviceModelId()  -> String?
     
     /**
-     * The session's current device VENDOR wire id ("meta", …) — the vendor
-     * half of the identity dial, catalog-resolved by the backend and captured
-     * from the same frames as `device_model_id`. `None` until a vendor-aware
-     * backend delivers it. Backs the shell's
-     * `GlassesTransport.currentVendorId()`.
-     */
-    func deviceVendor()  -> String?
-    
-    /**
      * End the session at the customer's request.
      */
     func disconnect() 
@@ -1004,20 +995,6 @@ open func currentSessionUrl() -> String? {
 open func deviceModelId() -> String? {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_extentos_core_fn_method_browsersimcore_device_model_id(self.uniffiClonePointer(),$0
-    )
-})
-}
-    
-    /**
-     * The session's current device VENDOR wire id ("meta", …) — the vendor
-     * half of the identity dial, catalog-resolved by the backend and captured
-     * from the same frames as `device_model_id`. `None` until a vendor-aware
-     * backend delivers it. Backs the shell's
-     * `GlassesTransport.currentVendorId()`.
-     */
-open func deviceVendor() -> String? {
-    return try!  FfiConverterOptionString.lift(try! rustCall() {
-    uniffi_extentos_core_fn_method_browsersimcore_device_vendor(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -3876,13 +3853,9 @@ public func FfiConverterTypeVoiceCore_lower(_ value: VoiceCore) -> UnsafeMutable
 
 /**
  * A pickable realtime model. `reasoning_capable` marks whether the model
- * accepts the `reasoning.effort` session knob — the OpenAI 2.x reasoning line
- * (`gpt-realtime-2`, `gpt-realtime-2.1`, `gpt-realtime-2.1-mini`) plus both
- * Gemini Live models. The session builder OMITS the knob when false so the
- * provider doesn't reject the whole session ("Unsupported option for this
- * model"). NOTE: 2.1-mini IS reasoning-capable even though the older
- * `gpt-realtime-mini` is not — it's a distilled reasoning model, not a
- * re-skin of mini. Don't infer this flag from the name.
+ * accepts the `reasoning.effort` session knob — only `gpt-realtime-2` today.
+ * The session builder OMITS the knob when false so the provider doesn't
+ * reject the whole session ("Unsupported option for this model").
  */
 public struct AssistantModel {
     public var id: String
@@ -10847,18 +10820,7 @@ public enum DeviceType {
      */
     case metaGlasses
     case metaOrion
-    /**
-     * Android XR projected audio glasses (vendor `android_xr`; the fall-2026
-     * Samsung-built line — camera + mic + speaker, no display). Preview: no
-     * shipping hardware yet; produced by the `:glasses-xr` ProjectedXrTransport.
-     */
-    case androidXrAudioGlasses
-    /**
-     * Android XR projected display glasses (vendor `android_xr`; the rumored
-     * 2027 display follow-on — adds a Glimmer display). Preview identity only;
-     * no transport produces it yet.
-     */
-    case androidXrDisplayGlasses
+    case mentraG1
     case unknown
 }
 
@@ -10887,11 +10849,9 @@ public struct FfiConverterTypeDeviceType: FfiConverterRustBuffer {
         
         case 7: return .metaOrion
         
-        case 8: return .androidXrAudioGlasses
+        case 8: return .mentraG1
         
-        case 9: return .androidXrDisplayGlasses
-        
-        case 10: return .unknown
+        case 9: return .unknown
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -10929,16 +10889,12 @@ public struct FfiConverterTypeDeviceType: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
         
         
-        case .androidXrAudioGlasses:
+        case .mentraG1:
             writeInt(&buf, Int32(8))
         
         
-        case .androidXrDisplayGlasses:
-            writeInt(&buf, Int32(9))
-        
-        
         case .unknown:
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(9))
         
         }
     }
@@ -14807,13 +14763,6 @@ public enum TransportChosen {
     case realMeta
     case browserSim
     case localSim
-    /**
-     * Android XR projected transport (`:glasses-xr` ProjectedXrTransport,
-     * vendor `android_xr`). Preview — resolves only when the host app
-     * explicitly registered the XR module AND a projected device
-     * association exists.
-     */
-    case projectedXr
 }
 
 
@@ -14833,8 +14782,6 @@ public struct FfiConverterTypeTransportChosen: FfiConverterRustBuffer {
         
         case 3: return .localSim
         
-        case 4: return .projectedXr
-        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -14853,10 +14800,6 @@ public struct FfiConverterTypeTransportChosen: FfiConverterRustBuffer {
         
         case .localSim:
             writeInt(&buf, Int32(3))
-        
-        
-        case .projectedXr:
-            writeInt(&buf, Int32(4))
         
         }
     }
@@ -15126,13 +15069,6 @@ public enum TransportSelectionSource {
     case fallbackDefault
     case explicitConfig
     case pairing
-    /**
-     * A host-registered vendor transport factory claimed the connection
-     * (vendor axis: e.g. `ExtentosXr.register()` + a live projected
-     * device association). Registration is explicit opt-in, so an
-     * unregistered build can never resolve here.
-     */
-    case vendorRegistry
 }
 
 
@@ -15157,8 +15093,6 @@ public struct FfiConverterTypeTransportSelectionSource: FfiConverterRustBuffer {
         case 5: return .explicitConfig
         
         case 6: return .pairing
-        
-        case 7: return .vendorRegistry
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -15190,10 +15124,6 @@ public struct FfiConverterTypeTransportSelectionSource: FfiConverterRustBuffer {
         
         case .pairing:
             writeInt(&buf, Int32(6))
-        
-        
-        case .vendorRegistry:
-            writeInt(&buf, Int32(7))
         
         }
     }
@@ -18723,10 +18653,10 @@ public func capabilityLabel(kind: DeclaredCapability) -> String {
 }
 /**
  * Identity-derived profile for a known device type. Must stay aligned with
- * `device-registry/glasses-models.json` (capability sets) — the sim path
+ * `device-registry/glasses-models.json` (`display` flags) — the sim path
  * resolves capability from that catalog over the wire; this is the DAT
- * (real-hardware) path's source. Orion isn't in the sim catalog but is
- * display hardware; `Unknown` never claims a screen.
+ * (real-hardware) path's source. Orion and Mentra G1 aren't in the sim
+ * catalog but are display hardware; `Unknown` never claims a screen.
  */
 public func capabilityProfileForDevice(device: DeviceType) -> DeviceCapabilitySet {
     return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
@@ -18984,20 +18914,6 @@ public func devicePageLabel(modelId: String?) -> String? {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_device_page_label(
         FfiConverterOptionString.lower(modelId),$0
-    )
-})
-}
-/**
- * Vendor wire id for a device identity — the vendor half of the identity
- * dial (`DeviceInfo.vendor` vocabulary; canonical tokens `"meta"` /
- * `"android_xr"`, decided 2026-07-24). Lives beside [`device_type_wire_id`]
- * so a new variant cannot ship without declaring its vendor; both shells
- * derive vendor identity from this instead of hardcoding `"meta"`.
- */
-public func deviceTypeVendor(deviceType: DeviceType) -> String {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_extentos_core_fn_func_device_type_vendor(
-        FfiConverterTypeDeviceType.lower(deviceType),$0
     )
 })
 }
@@ -19271,9 +19187,10 @@ public func memoryProfileRender(profileJson: String?) -> String? {
 })
 }
 /**
- * The Meta-lineup capability profile. Kept as a stable export for existing
- * shell call sites (iOS still calls it — migration ledger item); new code
- * routes through [`vendor_capability_profile`] with the transport's vendor.
+ * The Meta-lineup capability profile: camera/microphone/speaker are true
+ * across every current model (the pairing floor); display is the one live
+ * dial. The shells feed `display_capable` from the transport — this was
+ * duplicated twice in the Kotlin root before the hoist.
  */
 public func metaCapabilityProfile(displayCapable: Bool) -> DeviceCapabilitySet {
     return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
@@ -19371,11 +19288,12 @@ public func resolveAudioGate(privacyRaw: String?, audioEnabledRaw: String?) -> S
  * vary run to run is `available_now_mb`, and it can only ever step the
  * answer DOWN the eligible ladder or out to the cloud.
  */
-public func resolveAutoModel(ladder: [LocalRung], device: DeviceMemory) -> AutoResolution {
+public func resolveAutoModel(ladder: [LocalRung], device: DeviceMemory, servedRemotely: Bool) -> AutoResolution {
     return try!  FfiConverterTypeAutoResolution.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_resolve_auto_model(
         FfiConverterSequenceTypeLocalRung.lower(ladder),
-        FfiConverterTypeDeviceMemory.lower(device),$0
+        FfiConverterTypeDeviceMemory.lower(device),
+        FfiConverterBool.lower(servedRemotely),$0
     )
 })
 }
@@ -19461,23 +19379,6 @@ public func transcriptionGateOpen(privacyRaw: String?, audioEnabledRaw: String?,
     )
 })
 }
-/**
- * Vendor-routed capability profile — the vendor axis of the capability dial
- * (canonical vendor tokens `"meta"` / `"android_xr"`, decided 2026-07-24).
- * The shells feed the transport's vendor id + the live `display_capable`
- * dial; the per-vendor floors live HERE, once, instead of a Meta floor
- * hardcoded at every shell edge. A new vendor adds an arm (its Phase-1
- * capability-mapping table decides the values) — shell call sites don't
- * change.
- */
-public func vendorCapabilityProfile(vendor: String, displayCapable: Bool) -> DeviceCapabilitySet {
-    return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
-    uniffi_extentos_core_fn_func_vendor_capability_profile(
-        FfiConverterString.lower(vendor),
-        FfiConverterBool.lower(displayCapable),$0
-    )
-})
-}
 
 private enum InitializationResult {
     case ok
@@ -19539,7 +19440,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_capability_label() != 7687) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_func_capability_profile_for_device() != 54016) {
+    if (uniffi_extentos_core_checksum_func_capability_profile_for_device() != 59790) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_capability_wire_id() != 40381) {
@@ -19600,9 +19501,6 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_device_page_label() != 14399) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_extentos_core_checksum_func_device_type_vendor() != 24465) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_device_type_wire_id() != 58358) {
@@ -19668,7 +19566,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_memory_profile_render() != 33376) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_func_meta_capability_profile() != 62051) {
+    if (uniffi_extentos_core_checksum_func_meta_capability_profile() != 46161) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_normalize_display_root() != 59593) {
@@ -19689,7 +19587,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_resolve_audio_gate() != 28622) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_func_resolve_auto_model() != 42062) {
+    if (uniffi_extentos_core_checksum_func_resolve_auto_model() != 38066) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_resolve_camera_gate() != 17518) {
@@ -19708,9 +19606,6 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_transcription_gate_open() != 36844) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_extentos_core_checksum_func_vendor_capability_profile() != 33771) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_abort_capture_video() != 30615) {
@@ -19732,9 +19627,6 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_device_model_id() != 1052) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_extentos_core_checksum_method_browsersimcore_device_vendor() != 64841) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_disconnect() != 24983) {

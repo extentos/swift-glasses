@@ -24,6 +24,10 @@ let package = Package(
         // unlike an Android AAR, SPM only builds what you import, so the cost
         // of shipping it here is the platform floor above, not binary weight.
         .library(name: "GlassesLocal", targets: ["GlassesLocal"]),
+        // The on-device neural voice (Kokoro via sherpa-onnx). Separate for
+        // the same reason as GlassesLocal: the sherpa + onnxruntime binaries
+        // only land on apps that opt into the voice.
+        .library(name: "GlassesLocalVoice", targets: ["GlassesLocalVoice"]),
     ],
     dependencies: [
         .package(url: "https://github.com/facebook/meta-wearables-dat-ios", from: "0.8.0"),
@@ -41,8 +45,8 @@ let package = Package(
         // universal arm64/x86_64 simulator slice + macOS arm64).
         .binaryTarget(
             name: "extentos_coreFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/1.11.0/extentos_coreFFI.xcframework.zip",
-            checksum: "0e5a6b8299fd022b6273f3737e95f1f360f523a346727f0063b83f652e3e5e8e"
+            url: "https://github.com/extentos/swift-glasses/releases/download/1.11.1/extentos_coreFFI.xcframework.zip",
+            checksum: "4e1701755d6c95fd449acc1ee1e0cc85c9ddfc71f41b3d7595b157c361606858"
         ),
         .target(
             name: "GlassesCore",
@@ -72,6 +76,29 @@ let package = Package(
             ],
             // Swift 5 language mode like GlassesCore: MLX's UserInput/Chat
             // types are not Sendable-annotated yet.
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // sherpa-onnx C API shim (pinned v1.13.4). The committed header rides
+        // this target; the static libraries are the two binary targets below.
+        .target(name: "SherpaOnnxC"),
+        // Both are Release ASSETS rather than local paths — a published
+        // package cannot carry local-path binaryTargets, which is precisely
+        // why the voice shipped on Android months before iOS.
+        .binaryTarget(
+            name: "sherpaOnnxFFI",
+            url: "https://github.com/extentos/swift-glasses/releases/download/1.11.1/sherpaOnnxFFI.xcframework.zip",
+            checksum: "820fd8fad6b4ff197ebfdd952b0ec18b27f5edceb8d6de486ef9bccd3a35e301"
+        ),
+        .binaryTarget(
+            name: "onnxruntimeFFI",
+            url: "https://github.com/extentos/swift-glasses/releases/download/1.11.1/onnxruntimeFFI.xcframework.zip",
+            checksum: "b7cc4e29b9c9a7fc82e1a8b9ba415153fda1acca51ff7031ae7f8fed769a4057"
+        ),
+        .target(
+            name: "GlassesLocalVoice",
+            dependencies: ["GlassesCore", "SherpaOnnxC", "sherpaOnnxFFI", "onnxruntimeFFI"],
+            // Swift 5 language mode like GlassesCore/GlassesLocal: the C
+            // interop layer predates strict concurrency.
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

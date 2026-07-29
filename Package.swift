@@ -45,8 +45,8 @@ let package = Package(
         // universal arm64/x86_64 simulator slice + macOS arm64).
         .binaryTarget(
             name: "extentos_coreFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/2.0.0/extentos_coreFFI.xcframework.zip",
-            checksum: "b9209e6118ea1b11b0c130362caa879dbcd5c018cb0a11fdaf501fc5052c6014"
+            url: "https://github.com/extentos/swift-glasses/releases/download/2.0.1/extentos_coreFFI.xcframework.zip",
+            checksum: "496aa0bba9a1ac15c4b950d96e4f99dc6850d113ea9020898a079a16c5813bec"
         ),
         .target(
             name: "GlassesCore",
@@ -86,13 +86,13 @@ let package = Package(
         // why the voice shipped on Android months before iOS.
         .binaryTarget(
             name: "sherpaOnnxFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/2.0.0/sherpaOnnxFFI.xcframework.zip",
-            checksum: "b33043674c7fd31f3fda3bdfa80d68de0c01d50d691ab1209ed67a1b99e50fac"
+            url: "https://github.com/extentos/swift-glasses/releases/download/2.0.1/sherpaOnnxFFI.xcframework.zip",
+            checksum: "ab2eecf10ba850b7cb93faaba82aa57f3babd50af52ede108f8079ef0d1897b3"
         ),
         .binaryTarget(
             name: "onnxruntimeFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/2.0.0/onnxruntimeFFI.xcframework.zip",
-            checksum: "7be16dcd6dc2fe6c96ede4204444c93da6cbf15187dae020b33363c1c563e0d9"
+            url: "https://github.com/extentos/swift-glasses/releases/download/2.0.1/onnxruntimeFFI.xcframework.zip",
+            checksum: "b69fe8baac15f146260dc02ce731070cf9bc101d3d0539028507bfff77890fc6"
         ),
         .target(
             name: "GlassesLocalVoice",

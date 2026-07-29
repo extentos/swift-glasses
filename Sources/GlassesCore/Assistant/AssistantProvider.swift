@@ -22,6 +22,22 @@ public enum AssistantProvider: Sendable {
     /// / `.defaultVoice`) when the dashboard has none. A non-nil value set
     /// in code WINS over the dashboard — resolved once by the live-config
     /// overlay at session start.
+    case managed(
+        model: String? = nil,
+        voice: String? = nil,
+        turnDetection: TurnDetection = .serverVad(),
+        reasoningEffort: ReasoningEffort = .low
+    )
+
+    /// Former name for ``managed``. The name was misleading: the MODEL ID picks
+    /// the vendor (`gpt-*` OpenAI, `grok-*` xAI, `gemini-*` Google, `local-*`
+    /// on-device), so `.openAI(model: "local-auto")` ran Qwen on the phone with
+    /// no network — which reads like a bug and isn't one.
+    ///
+    /// Kept as a fully working deprecated case so existing code keeps
+    /// compiling. Behaviour is identical to ``managed``.
+    @available(*, deprecated, renamed: "managed",
+               message: "Renamed to .managed — the model id picks the vendor, so naming the case after one vendor was misleading. Behaviour is unchanged.")
     case openAI(
         model: String? = nil,
         voice: String? = nil,
@@ -32,6 +48,16 @@ public enum AssistantProvider: Sendable {
     /// Deterministic in-process provider for unit tests + the MCP
     /// `injectAssistantUtterance(text:)` path. No network, no key.
     case mock(behavior: MockBehavior = .matchToolDescriptions)
+
+    /// Collapse the deprecated ``openAI`` case onto ``managed`` so the rest of
+    /// the SDK only ever switches on one shape. Applied at the
+    /// session-construction entry points; customer code never sees this.
+    internal var normalized: AssistantProvider {
+        if case .openAI(let m, let v, let t, let r) = self {
+            return .managed(model: m, voice: v, turnDetection: t, reasoningEffort: r)
+        }
+        return self
+    }
 
     /// Hard fallback model used when neither code nor the dashboard sets
     /// one — core-owned (realtime/catalog.rs; matches the `realtime_model`

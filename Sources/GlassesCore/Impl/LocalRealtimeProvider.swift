@@ -225,8 +225,11 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
         self.model = model
         let voiceId = voice ?? "system"
         self.voiceId = voiceId
+        // Memoized resolve: the direct-speak path (DefaultAudioClient) and
+        // this mouth share one loaded engine per voice id, not two model
+        // copies in RAM.
         self.voiceSynth = voiceId == "system"
-            ? nil : LocalVoiceRegistry.synthesizerFactory?(voiceId)
+            ? nil : LocalVoiceRegistry.resolve(voiceId)
         self.brain = brain
         self.audio = audio
         self.transport = transport
@@ -382,7 +385,7 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
     // ── Ears → events ────────────────────────────────────────────────────
 
     /// The onset path (EarsTuning.onsetBargeIn). Fires at most one machine
-    /// SpeechStarted per speech run. Cancel is final (RDQ #67): a run that
+    /// SpeechStarted per speech run. Cancel is final (RDQ #73): a run that
     /// produces no real transcript leaves the machine simply listening.
     private func onSpeechRun(_ runMs: UInt32) {
         guard isConnected() else { return }
@@ -733,7 +736,9 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
             }
             trace.record("mouth: kokoro synth returned \(seconds.map { String(format: "%.2fs audio", $0) } ?? "nil") in \(Self.nowMs() - t0)ms")
             if let seconds {
-                let remainMs = Int64(seconds * 1000) - (Self.nowMs() - t0) + 120
+                // Core-owned accounting (speak.rs) — tail pad included; the
+                // direct-speak path waits with the same arithmetic.
+                let remainMs = speakPlaybackRemainderMs(audioSeconds: seconds, elapsedMs: Self.nowMs() - t0)
                 if remainMs > 0 {
                     try? await Task.sleep(nanoseconds: UInt64(remainMs) * 1_000_000)
                 }

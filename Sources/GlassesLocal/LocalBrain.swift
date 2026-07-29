@@ -517,7 +517,7 @@ public actor LocalBrain {
             var cache = cacheIn
             var fed = fedIn
             var stateNote: String? = nil
-            // Cold-start killer (the Android RDQ #74 design, MLX edition):
+            // Cold-start killer (the Android RDQ #80 design, MLX edition):
             // a fresh brain first tries the persisted prefix state — a
             // safetensors flash read replacing the multi-second prefill.
             // The file is keyed by the exact token ids (+ model id + format
@@ -582,7 +582,7 @@ public actor LocalBrain {
         }
     }
 
-    // ── Prefix-KV persistence (RDQ #74, MLX edition) ─────────────────────
+    // ── Prefix-KV persistence (RDQ #80, MLX edition) ─────────────────────
     // The rendered-prefix token ids ARE the invalidation key: model id +
     // exact tokens + format salt hash into the file name, so instructions/
     // tool/template/tokenizer drift lands on a different file (stale ones

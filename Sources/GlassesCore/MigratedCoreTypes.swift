@@ -55,6 +55,20 @@ public extension TransportChosen {
         case .realMeta: return "RealMeta"
         case .browserSim: return "BrowserSim"
         case .localSim: return "LocalSim"
+        // Android XR projected transport (vendor android_xr) — Android-only
+        // structurally (no iOS surface exists for this vendor); the case is
+        // mirrored so the shared vocabulary stays exhaustive on both shells.
+        case .projectedXr: return "ProjectedXr"
+        // The vendorless Bluetooth-audio baseline. Android ships the transport
+        // first (Principle #5); the case is mirrored here so the shared
+        // vocabulary stays exhaustive on both shells and parity CI stays green.
+        case .systemAudio: return "SystemAudio"
+        // Brilliant Labs BLE transport (vendor brilliant). Android ships the
+        // transport first (Principle #4); the case is mirrored here so the
+        // shared vocabulary stays exhaustive on both shells. An iOS BleBridge
+        // over CoreBluetooth is the remaining piece — all the protocol already
+        // lives in the shared core, so it is the socket and nothing else.
+        case .brilliantBle: return "BrilliantBle"
         }
     }
 }
@@ -68,6 +82,9 @@ public extension TransportSelectionSource {
         case .fallbackDefault: return "fallback_default"
         case .explicitConfig: return "explicit_config"
         case .pairing: return "pairing"
+        // Vendor-registry Auto arm (Android-only today) — mirrored for
+        // exhaustiveness; iOS Auto resolution never produces it.
+        case .vendorRegistry: return "vendor_registry"
         }
     }
 }

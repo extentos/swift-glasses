@@ -92,14 +92,16 @@ internal final class DefaultAssistantClient: AssistantClient, @unchecked Sendabl
     ) async throws -> any AssistantSession {
         let builder = AssistantConfigBuilder()
         configure(builder)
-        let config = builder.build(provider: provider)
+        // Collapse the deprecated .openAI case onto .managed once, here, so no
+        // internal switch has to know about both shapes.
+        let config = builder.build(provider: provider.normalized)
         let session = createSessionInternal(config: config)
         try await session.start()
         return session
     }
 
     func createSession(config: AssistantConfig) -> any AssistantSession {
-        createSessionInternal(config: config)
+        createSessionInternal(config: config.withProvider(config.provider.normalized))
     }
 
     func stop() async {
@@ -517,7 +519,7 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
     /// values. Skips the network entirely when everything dashboard-driven
     /// is already pinned in code, and for the Mock provider.
     private func resolveLiveOverlay() async -> LiveAssistantConfig? {
-        guard case .openAI = config.provider else { return nil }
+        guard case .managed = config.provider else { return nil }
         // NOTE: the fetch is no longer skipped when every overlay field is
         // code-pinned — the payload now also carries the project's named
         // sounds + the wake-sound "None" flag, which apply regardless.
@@ -568,7 +570,11 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
             )
             .appendingTool(config.endOnIntent ? buildEndConversationTool() : nil)
         switch config.provider {
-        case .openAI(let model, let voice, let turnDetection, let reasoningEffort):
+        // Unreachable — `normalized` collapses .openAI onto .managed at both
+        // construction entry points. Present only to keep the switch exhaustive.
+        case .openAI:
+            preconditionFailure("openAI must be normalized to managed first")
+        case .managed(let model, let voice, let turnDetection, let reasoningEffort):
             // The managed gateway is the ONLY path (code-direct BYOK
             // removed — Android parity). The token inside the backing is
             // resolved later, at WS open, so a not-yet-authed device still

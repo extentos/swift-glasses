@@ -51,12 +51,138 @@ final class DefaultAudioClient: AudioClient, @unchecked Sendable {
         sounds.names()
     }
 
+    // MARK: - Direct speak: local-voice routing (facts here, decisions in
+    // the core's speak.rs — the resolveAudioGate/toggle_policy split; the
+    // Kotlin mirror is DefaultAudioClient.kt). A voice id a registered
+    // synthesizer claims and can serve streams through the outgoing-audio
+    // path; everything else is the platform TTS engine, serve-until-ready.
+
+    /// The in-flight direct-speak local synthesis, so `cancelSpeak` can
+    /// abort it without ever touching an assistant-owned synthesis running
+    /// on the same shared engine.
+    private final class LocalSpeak: @unchecked Sendable {
+        let synth: any LocalVoiceSynthesizer
+        private let lock = NSLock()
+        private var _cancelled = false
+        private var _emitting = false
+
+        init(synth: any LocalVoiceSynthesizer) { self.synth = synth }
+
+        var cancelled: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return _cancelled
+        }
+        var emitting: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return _emitting
+        }
+        func markCancelled() { lock.lock(); _cancelled = true; lock.unlock() }
+        func markEmitting() { lock.lock(); _emitting = true; lock.unlock() }
+    }
+
+    private let speakLock = NSLock()
+    private var activeLocalSpeak: LocalSpeak?
+
     func speak(_ text: String, config: SpeakConfig) async -> ExtentosResult<Void, AudioError> {
-        await transport.speak(text: text, config: config)
+        if let synth = await localSynthFor(config.voice) {
+            if await speakViaLocalSynth(synth, text: text, config: config) {
+                return .success(())
+            }
+            // Genuine synthesis failure → the system voice serves this call.
+        }
+        return await transport.speak(text: text, config: config)
+    }
+
+    /// Gather the registry facts for the voice id and let the core route.
+    /// The first policy call uses best-case facts: ids the core routes to
+    /// the system voice unconditionally (nil/""/"system") never touch the
+    /// registry — no engine construction, no warm-up.
+    private func localSynthFor(_ voiceId: String?) async -> (any LocalVoiceSynthesizer)? {
+        if resolveSpeakRoute(voiceId: voiceId, synthResolved: true, synthReady: true) == .systemTts {
+            return nil
+        }
+        guard let voiceId, let synth = LocalVoiceRegistry.resolve(voiceId) else { return nil }
+        // Idempotent; returns fast when the model isn't on disk (system
+        // voice serves — serve-until-ready). When it IS on disk, the first
+        // natural-voice speak pays the one-time engine load here rather
+        // than silently serving the system voice with no path to ready.
+        await synth.warmUp()
+        let ready = await synth.isReady()
+        switch resolveSpeakRoute(voiceId: voiceId, synthResolved: true, synthReady: ready) {
+        case .localSynth: return synth
+        case .systemTts: return nil
+        }
+    }
+
+    /// One utterance through the local synthesizer, streaming into the
+    /// transport's outgoing-audio path (audible at the FIRST chunk — the
+    /// assistant mouth's K3 semantics). Returns true when this call is done
+    /// (played out or cancelled); false only on genuine synthesis failure,
+    /// where the caller serves the system voice instead.
+    ///
+    /// `SpeakConfig.waitForCompletion` waits out the playback remainder
+    /// (core-owned accounting, tail pad included); false returns once
+    /// synthesis finishes, with the tail still playing. rate/pitch apply
+    /// to the platform voice only — a local voice speaks at model prosody.
+    private func speakViaLocalSynth(
+        _ synth: any LocalVoiceSynthesizer,
+        text: String,
+        config: SpeakConfig
+    ) async -> Bool {
+        let call = LocalSpeak(synth: synth)
+        speakLock.lock(); activeLocalSpeak = call; speakLock.unlock()
+        defer {
+            speakLock.lock()
+            if activeLocalSpeak === call { activeLocalSpeak = nil }
+            speakLock.unlock()
+        }
+        let gain = config.volume
+        let t0 = Self.nowMs()
+        let transport = self.transport
+        let seconds = await synth.synthesize(text) { pcm, rate in
+            call.markEmitting()
+            // The cancel guard lives HERE, not only in the engine: on a
+            // shared engine cancelSpeak() may not abort a synthesis it
+            // can't prove is ours — dropping the chunks is the guarantee.
+            guard !call.cancelled else { return }
+            let bytes = gain >= 1.0 ? pcm : scalePcm16Gain(pcm: pcm, gain: gain)
+            transport.sendOutgoingAudioChunk(sampleRate: rate, pcmBytes: bytes)
+        }
+        // Cancelled = done. NEVER fall back — the b24 trace: a barge-in
+        // would re-speak the interrupted text in the system voice.
+        if call.cancelled { return true }
+        guard let seconds else { return false }
+        if config.waitForCompletion {
+            let remainMs = speakPlaybackRemainderMs(audioSeconds: seconds, elapsedMs: Self.nowMs() - t0)
+            if remainMs > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(remainMs) * 1_000_000)
+            }
+        }
+        return true
     }
 
     func cancelSpeak() async {
+        speakLock.lock()
+        let call = activeLocalSpeak
+        speakLock.unlock()
+        if let call {
+            call.markCancelled()
+            // Abort engine compute + drain downstream audio only when the
+            // live synthesis is provably OURS (a chunk has been emitted).
+            // On the shared engine, an assistant segment may hold the
+            // synthesis serialization instead — its speech is not this
+            // method's to kill, and flushing would clip it. The emit guard
+            // above still silences OUR call the moment it runs.
+            if call.emitting {
+                await call.synth.cancel()
+                transport.cancelOutgoingAudio()
+            }
+        }
         await transport.cancelSpeak()
+    }
+
+    private static func nowMs() -> Int64 {
+        Int64(Date().timeIntervalSince1970 * 1000)
     }
 
     func earcon(_ sound: EarconSound, volume: Float) async {

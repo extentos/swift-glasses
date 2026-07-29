@@ -75,22 +75,14 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
     private var videoCaptureTask: Task<Void, Never>?
     private var videoCaptureRequestId: String?
 
-    private var audioSessionActive: Bool = false
 
     // Outgoing audio (Phase 4 S0.M.1). Lazy-init on first chunk; recreate
     // on sample-rate change; release on teardown. Single engine per bridge
     // instance, matching the Android AudioTrack lifecycle in
     // MetaHardwareBridge.kt:104-113.
-    private var outgoingAudioEngine: AVAudioEngine?
-    private var outgoingAudioPlayer: AVAudioPlayerNode?
-    private var outgoingAudioFormat: AVAudioFormat?
-    private var outgoingAudioSampleRate: Double = 0
 
-    private var sttEngine: PlatformSttEngine?
-    private var sttHandle: SttEngineHandle?
 
     private var thermalObserver: NSObjectProtocol?
-    private var audioRouteObserver: NSObjectProtocol?
     private var didBackgroundObserver: NSObjectProtocol?
     private var willForegroundObserver: NSObjectProtocol?
     private let callObserver = CXCallObserver()
@@ -99,39 +91,21 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
 
     // ── Audio + TTS (constructor-init) ───────────────────────────────────
 
-    let sharedAudioInput: SharedAudioInput
-    private let speechSynthesizer = AVSpeechSynthesizer()
-    private let speechDelegate = SpeechDelegateBox()
+    // The vendor-independent audio substrate — mic, speaker, STT, TTS, route
+    // observing. NONE of it is MWDAT: on real Ray-Bans the audio path is plain
+    // AVFoundation over Bluetooth HFP, identical to any other hands-free
+    // glasses. Delegating (rather than keeping a Meta-flavored copy) is what
+    // lets SystemAudioTransport run the SAME code instead of a fork.
+    let systemAudio = SystemAudioBridge()
+    var sharedAudioInput: SharedAudioInput { systemAudio.sharedAudioInput }
 
-    init() {
-        // Capture-then-bind: the SharedAudioInput callbacks need to flip
-        // `audioSessionActive` for the R12 route-change gating below. The
-        // class-level reference would normally make `self` capture in init
-        // a self-referential closure; routed through a weak holder so the
-        // SharedAudioInput doesn't retain the bridge.
-        let holder = AudioFlagHolder()
-        self.sharedAudioInput = SharedAudioInput(
-            configureSession: { [holder] in
-                try Self.configureAudioSession()
-                holder.set(true)
-            },
-            teardownSession: { [holder] in
-                Self.deactivateAudioSession()
-                holder.set(false)
-            }
-        )
-        holder.attach { [weak self] active in
-            guard let self else { return }
-            self.lock.lock()
-            self.audioSessionActive = active
-            self.lock.unlock()
-        }
-    }
+    init() {}
 
     func attachCore(_ core: RealMetaCore) {
         lock.lock()
         self.core = core
         lock.unlock()
+        systemAudio.attachCore(core)
     }
 
     /// Tear down scope-owned work. The shell calls this on `shutdown()`.
@@ -145,10 +119,7 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
         cancelMWDATTokens()
         videoCaptureTask?.cancel()
         videoCaptureTask = nil
-        sttHandle?.close()
-        sttEngine = nil
-        sttHandle = nil
-        releaseOutgoingAudio()
+        systemAudio.teardown()
     }
 
     // ── HardwareBridge: SDK lifecycle ────────────────────────────────────
@@ -1165,282 +1136,40 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
     }
 
     func recordAudio(requestId: String, config: AudioRecordConfigWire) {
-        Task { [weak self] in
-            guard let self else { return }
-            let customerConfig = AudioRecordConfig(
-                maxDurationSeconds: config.maxDurationSeconds.map(Int.init),
-                silenceTimeoutSeconds: Int(config.silenceTimeoutSeconds ?? 2),
-                quality: config.quality
-            )
-            let session = AudioCaptureSession(
-                audioInput: self.sharedAudioInput,
-                config: customerConfig
-            )
-            switch await session.run() {
-            case .success(let recording):
-                self.corePtr?.onAudioRecorded(
-                    requestId: requestId,
-                    recording: recording,
-                    error: nil
-                )
-            case .failure(let err):
-                self.corePtr?.onAudioRecorded(
-                    requestId: requestId,
-                    recording: nil,
-                    error: BridgeError(
-                        code: "record_audio_failed",
-                        message: Self.audioErrorMessage(err)
-                    )
-                )
-            }
-        }
+        systemAudio.recordAudio(requestId: requestId, config: config)
     }
 
     // ── HardwareBridge: STT ──────────────────────────────────────────────
 
     func startSttSession(requestId: String, config: SttConfigWire) {
-        let customerConfig = TranscriptionConfig(
-            language: config.language,
-            partial: config.partial
-        )
-        let audioInput = sharedAudioInput
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let engine = PlatformSttEngine(
-                audioInput: audioInput,
-                factory: SystemSttSessionFactory()
-            )
-            let handle = engine.start(
-                config: customerConfig,
-                onTranscript: { [weak self] transcript in
-                    self?.corePtr?.onTranscript(
-                        source: .appleStt,
-                        transcript: transcript
-                    )
-                },
-                onError: { [weak self] error in
-                    self?.corePtr?.onTransportError(
-                        error: SttErrorMapper.map(error)
-                    )
-                }
-            )
-            self.lock.lock()
-            self.sttEngine = engine
-            self.sttHandle = handle
-            self.lock.unlock()
-            self.corePtr?.onSttStarted(requestId: requestId, error: nil)
-        }
+        systemAudio.startSttSession(requestId: requestId, config: config)
     }
 
-    func stopSttSession() {
-        let handle = takeSttHandle()
-        Task { @MainActor in handle?.close() }
-    }
+    func stopSttSession() { systemAudio.stopSttSession() }
 
     // ── HardwareBridge: output ───────────────────────────────────────────
 
     func speak(requestId: String, text: String, config: SpeakConfigWire) {
-        let utterance = AVSpeechUtterance(string: text)
-        if let voice = config.voice, let explicit = AVSpeechSynthesisVoice(identifier: voice) {
-            utterance.voice = explicit
-        } else {
-            // Voice rung 1 (doc 14 §2.4; Kokoro is rung 2): the bare
-            // language lookup returns the COMPACT robot voice unless the
-            // user changed system defaults. "System voice" now means the
-            // best NEURAL system voice the device has installed
-            // (premium > enhanced > default) — zero dependencies, still
-            // fully offline, and downloadable voices upgrade it for free.
-            utterance.voice = Self.bestInstalledVoice(language: "en-US")
-                ?? AVSpeechSynthesisVoice(language: "en-US")
-        }
-        utterance.rate = max(0.0, min(1.0, AVSpeechUtteranceDefaultSpeechRate * Float(config.rate)))
-        utterance.pitchMultiplier = max(0.5, min(2.0, 1.0 + Float(config.pitch)))
-        utterance.volume = max(0.0, min(1.0, Float(config.volume)))
-
-        if config.waitForCompletion {
-            // Per-utterance continuation slot — see SpeechDelegateBox.
-            // The delegate resumes the continuation on didFinish /
-            // didCancel; we forward to `on_speak_completed` from there.
-            Task { [weak self, weak speechSynthesizer, weak speechDelegate] in
-                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                    guard let speechDelegate, let speechSynthesizer else {
-                        cont.resume(); return
-                    }
-                    speechDelegate.register(utterance, continuation: cont)
-                    speechSynthesizer.delegate = speechDelegate
-                    speechSynthesizer.speak(utterance)
-                }
-                self?.corePtr?.onSpeakCompleted(requestId: requestId, error: nil)
-            }
-        } else {
-            speechSynthesizer.speak(utterance)
-            // Fire-and-forget — symmetry with Android: emit completion
-            // immediately. The core forwards `Ok` to the customer without
-            // awaiting.
-            corePtr?.onSpeakCompleted(requestId: requestId, error: nil)
-        }
+        systemAudio.speak(requestId: requestId, text: text, config: config)
     }
 
-    func cancelSpeak() {
-        speechSynthesizer.stopSpeaking(at: .immediate)
-    }
-
-    /// Best installed voice for the language: premium > enhanced > default
-    /// quality, exact language match over prefix match, identifier order as
-    /// the deterministic tiebreak. Cached after first resolution (the voice
-    /// inventory doesn't change mid-session) and noted once for
-    /// diagnosability.
-    private static let voiceLock = NSLock()
-    nonisolated(unsafe) private static var voiceCache: [String: AVSpeechSynthesisVoice] = [:]
-    static func bestInstalledVoice(language: String) -> AVSpeechSynthesisVoice? {
-        voiceLock.lock()
-        defer { voiceLock.unlock() }
-        if let hit = voiceCache[language] { return hit }
-        let prefix = language.prefix(2)
-        func rank(_ v: AVSpeechSynthesisVoice) -> (Int, Int, String) {
-            let quality: Int
-            switch v.quality {
-            case .premium: quality = 2
-            case .enhanced: quality = 1
-            default: quality = 0
-            }
-            return (quality, v.language == language ? 1 : 0, v.identifier)
-        }
-        let picked = AVSpeechSynthesisVoice.speechVoices()
-            .filter { $0.language.hasPrefix(prefix) }
-            .max { rank($0) < rank($1) }
-        if let picked {
-            let quality = picked.quality == .premium ? "premium"
-                : picked.quality == .enhanced ? "enhanced" : "default"
-            WakeLedger.shared.note("tts: voice \(picked.name) (\(quality))")
-            voiceCache[language] = picked
-        }
-        return picked
-    }
+    func cancelSpeak() { systemAudio.cancelSpeak() }
 
     func earcon(sound: EarconSound, volume: Float) {
-        // No bundled earcon assets in Phase 2A; the existing iOS shell
-        // used the system "Tink" sound as a placeholder. Preserved.
-        AudioServicesPlaySystemSound(1057) // Tink
+        systemAudio.earcon(sound: sound, volume: volume)
     }
 
-    // ── Outgoing audio (Phase 4 S0.M.1) ──────────────────────────────────
+    // ── Outgoing audio ───────────────────────────────────────────────────
     //
-    // Phase 4's AssistantProvider streams TTS PCM chunks here via
-    // RealMetaTransport.sendOutgoingAudioChunk. AVAudioEngine +
-    // AVAudioPlayerNode buffer FIFO; mainMixerNode handles rate conversion
-    // to the output device. AVAudioSession `.playAndRecord` + `.voiceChat`
-    // mode + `.allowBluetooth` routes through HFP/SCO when a BT headset
-    // (Ray-Bans) is paired. Mirrors the Android AudioTrack path in
-    // MetaHardwareBridge.kt:825-906; ordering preserved by
-    // AVAudioPlayerNode's internal FIFO and the bridge lock around
-    // engine state.
-    //
-    // Sample-rate contract: caller passes i16 LE PCM at `sampleRate`. If
-    // the provider's wire format is mulaw (Phase 4 OpenAI Realtime with
-    // `audio/pcmu`), the provider decodes mulaw → i16 PCM BEFORE calling
-    // — keeps this layer format-agnostic and matches the Android +
-    // BrowserSim contract.
+    // Delegated: the AVAudioEngine playback path and the barge-in flush are
+    // vendor-independent (AVAudioSession .playAndRecord/.voiceChat routes to
+    // HFP when Bluetooth glasses are paired).
+
     func playOutgoingAudioChunk(sampleRate: Int32, pcmBytes: Data) {
-        if pcmBytes.isEmpty { return }
-
-        lock.lock()
-        let engine = outgoingAudioEngine
-        let rateChanged = outgoingAudioSampleRate != Double(sampleRate)
-        lock.unlock()
-
-        // A non-nil engine can be silently DEAD: an AVAudioSession
-        // deactivation (SharedAudioInput tears the session down whenever
-        // the last mic consumer unsubscribes — routine during post-sleep
-        // dormancy, where only the wake-STT restart cycle touches the
-        // session) stops the engine, and AVAudioPlayerNode then swallows
-        // scheduled buffers without any error. Same-rate chunks never
-        // triggered a rebuild, so after sleep→re-wake every response
-        // played into the void (2026-07-15 hardware finding: assistant
-        // answered every wake, inaudibly). Resurrect on the next chunk —
-        // the camera auto-reload lesson applied to playback.
-        let engineDead = engine != nil && engine?.isRunning == false
-        if engine == nil || rateChanged || engineDead {
-            rebuildOutgoingAudio(sampleRate: sampleRate)
-        }
-
-        lock.lock()
-        let player = outgoingAudioPlayer
-        let format = outgoingAudioFormat
-        lock.unlock()
-
-        guard let player, let format,
-              let buffer = Self.makePCMBuffer(format: format, pcmBytes: pcmBytes)
-        else { return }
-        player.scheduleBuffer(buffer, completionHandler: nil)
+        systemAudio.playOutgoingAudioChunk(sampleRate: sampleRate, pcmBytes: pcmBytes)
     }
 
-    /// Drop any audio queued on the outgoing player (F12 barge-in): the
-    /// model sends seconds of buffered audio faster-than-realtime, and an
-    /// interrupt must stop it audibly NOW, not at the buffer's natural
-    /// end. `AVAudioPlayerNode.stop()` flushes its scheduled buffers;
-    /// `play()` re-arms the node so subsequent chunks land on a clean
-    /// queue. Mirrors Android `MetaHardwareBridge.flushOutgoingAudio()`.
-    func flushOutgoingAudio() {
-        lock.lock()
-        let player = outgoingAudioPlayer
-        let engine = outgoingAudioEngine
-        lock.unlock()
-        guard let player else { return }
-        player.stop()
-        if engine?.isRunning == true { player.play() }
-    }
-
-    private func rebuildOutgoingAudio(sampleRate: Int32) {
-        lock.lock()
-        let oldEngine = outgoingAudioEngine
-        let oldPlayer = outgoingAudioPlayer
-        lock.unlock()
-
-        oldPlayer?.stop()
-        oldEngine?.stop()
-
-        // Configure + activate the shared AVAudioSession. Idempotent if
-        // mic-input has already activated it via SharedAudioInput. Sprint 0
-        // doesn't coordinate teardown between owners — Sprint 1 lifecycle
-        // work owns that.
-        try? Self.configureAudioSession()
-
-        guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: Double(sampleRate),
-            channels: 1,
-            interleaved: true
-        ) else { return }
-
-        let engine = AVAudioEngine()
-        let player = AVAudioPlayerNode()
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: format)
-        do { try engine.start() } catch { return }
-        player.play()
-
-        lock.lock()
-        outgoingAudioEngine = engine
-        outgoingAudioPlayer = player
-        outgoingAudioFormat = format
-        outgoingAudioSampleRate = Double(sampleRate)
-        lock.unlock()
-    }
-
-    private func releaseOutgoingAudio() {
-        lock.lock()
-        let engine = outgoingAudioEngine
-        let player = outgoingAudioPlayer
-        outgoingAudioEngine = nil
-        outgoingAudioPlayer = nil
-        outgoingAudioFormat = nil
-        outgoingAudioSampleRate = 0
-        lock.unlock()
-
-        player?.stop()
-        engine?.stop()
-    }
+    func flushOutgoingAudio() { systemAudio.flushOutgoingAudio() }
 
     // ── HardwareBridge: hardware observers ───────────────────────────────
 
@@ -1465,11 +1194,11 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
         let active = observersWired
         observersWired = false
         let toRemove = [
-            thermalObserver, audioRouteObserver,
+            thermalObserver,
             didBackgroundObserver, willForegroundObserver,
         ]
         thermalObserver = nil
-        audioRouteObserver = nil
+        systemAudio.stopRouteObserver()
         didBackgroundObserver = nil
         willForegroundObserver = nil
         lock.unlock()
@@ -1483,10 +1212,7 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
         callObserver.setDelegate(nil, queue: nil)
     }
 
-    func hasMicPermission() -> Bool {
-        let granted = AVAudioSession.sharedInstance().recordPermission == .granted
-        return granted
-    }
+    func hasMicPermission() -> Bool { systemAudio.hasMicPermission() }
 
     // ── Shell-internal: streaming primitives that bypass the core ────────
 
@@ -1556,53 +1282,7 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
     /// `transcriptions` / `capture_video` audio (R10: one tap per node).
     /// Bypasses the core by design.
     func audioChunksStream(config: AudioChunkConfig) -> AsyncStream<AudioChunk> {
-        AsyncStream { continuation in
-            let subBox = AudioSubscriptionBox()
-            let bridge = self
-            var timestampMs: Int64 = 0
-            let handler: (AVAudioPCMBuffer, AVAudioTime) -> Void = { buffer, _ in
-                let chunk = AudioChunk(
-                    samples: Self.pcmData(from: buffer),
-                    sampleRate: Int(buffer.format.sampleRate),
-                    timestampMs: timestampMs
-                )
-                timestampMs += Int64(config.chunkMillis)
-                continuation.yield(chunk)
-            }
-            // Subscribe with retry: a failed subscribe means AVAudioSession
-            // activation threw (the same launch/wake race PlatformSttEngine
-            // retries through). Finishing the stream here killed the
-            // realtime mic pump permanently when the assistant connected
-            // during the wake-time session churn (2026-07-15) — the pump's
-            // `for await` ended and the assistant stayed deaf. Retry at
-            // 1Hz until subscribed or the consumer goes away.
-            let subscribeTask = Task { [weak bridge] in
-                var attempts = 0
-                while !Task.isCancelled {
-                    guard let bridge else { return }
-                    if let id = bridge.sharedAudioInput.subscribe(handler) {
-                        await subBox.set(id)
-                        if attempts > 0 {
-                        }
-                        // The consumer may have terminated mid-subscribe.
-                        if Task.isCancelled {
-                            bridge.sharedAudioInput.unsubscribe(id)
-                        }
-                        return
-                    }
-                    attempts += 1
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                }
-            }
-            continuation.onTermination = { _ in
-                subscribeTask.cancel()
-                Task { [bridge] in
-                    if let id = await subBox.id() {
-                        bridge.sharedAudioInput.unsubscribe(id)
-                    }
-                }
-            }
-        }
+        systemAudio.audioChunksStream(config: config)
     }
 
     // ── Listeners ────────────────────────────────────────────────────────
@@ -1706,33 +1386,7 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
         lock.lock(); thermalObserver = observer; lock.unlock()
     }
 
-    private func wireAudioRoute() {
-        let center = NotificationCenter.default
-        let observer = center.addObserver(
-            forName: AVAudioSession.routeChangeNotification,
-            object: nil,
-            queue: nil
-        ) { [weak self] note in
-            guard let self else { return }
-            // R12 — only forward route changes when the bridge actually owns
-            // an active AVAudioSession (i.e. a mic consumer is running
-            // through SharedAudioInput). Idle route changes are noise.
-            self.lock.lock()
-            let active = self.audioSessionActive
-            self.lock.unlock()
-            if !active { return }
-            guard let reasonRaw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-                  let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw) else { return }
-            let mappedReason = Self.mapRouteChangeReason(reason)
-            let port = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portType.rawValue ?? ""
-            let newRoute = Self.mapAudioPort(port)
-            self.corePtr?.onAudioRouteChanged(
-                newRoute: newRoute,
-                reason: mappedReason
-            )
-        }
-        lock.lock(); audioRouteObserver = observer; lock.unlock()
-    }
+    private func wireAudioRoute() { systemAudio.startRouteObserver() }
 
     private func wireLifecycle() {
         let center = NotificationCenter.default
@@ -1824,14 +1478,6 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
         return armedStreamInfo
     }
 
-    private func takeSttHandle() -> SttEngineHandle? {
-        lock.lock(); defer { lock.unlock() }
-        let h = sttHandle
-        sttHandle = nil
-        sttEngine = nil
-        return h
-    }
-
     private func clearVideoCapture(requestId: String) {
         lock.lock()
         if videoCaptureRequestId == requestId {
@@ -1888,22 +1534,6 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
 
     // ── Static helpers ───────────────────────────────────────────────────
 
-    private static func configureAudioSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playAndRecord,
-            mode: .voiceChat,
-            options: [.allowBluetooth, .allowBluetoothA2DP]
-        )
-        try session.setActive(true)
-    }
-
-    private static func deactivateAudioSession() {
-        try? AVAudioSession.sharedInstance().setActive(
-            false,
-            options: .notifyOthersOnDeactivation
-        )
-    }
 
     private static func mapResolution(_ r: Resolution) -> MWDATCamera.StreamingResolution {
         switch r {
@@ -1941,87 +1571,13 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
         }
     }
 
-    private static func mapRouteChangeReason(_ reason: AVAudioSession.RouteChangeReason) -> AudioRouteChangeReason {
-        switch reason {
-        case .newDeviceAvailable: return .newDeviceAvailable
-        case .oldDeviceUnavailable: return .oldDeviceUnavailable
-        case .override: return .userOverride
-        case .categoryChange: return .categoryChange
-        default: return .unknown
-        }
-    }
-
-    private static func mapAudioPort(_ portType: String) -> AudioRoute {
-        switch portType {
-        case AVAudioSession.Port.bluetoothA2DP.rawValue,
-             AVAudioSession.Port.bluetoothHFP.rawValue,
-             AVAudioSession.Port.bluetoothLE.rawValue:
-            return .bluetoothEarbuds
-        case AVAudioSession.Port.headphones.rawValue:
-            return .wiredEarbuds
-        case AVAudioSession.Port.builtInSpeaker.rawValue:
-            return .phoneSpeaker
-        default:
-            return .glassesSpeaker
-        }
-    }
 
     // Capture-error copy comes from the CORE's exported captureErrorMessage
     // (types/errors.rs — one vocabulary, both platforms; the private Swift
     // duplicate here went stale the moment the core gained StreamPaused and
     // broke the iOS-platform build for 6 days unnoticed).
 
-    private static func audioErrorMessage(_ e: AudioError) -> String {
-        switch e {
-        case .notConnected: return "not_connected"
-        case .permissionDenied: return "permission_denied"
-        case .coexistenceBlocked: return "coexistence_blocked"
-        case .disabledByUser: return "disabled_by_user"
-        case .platformError(let code, let message): return "\(code): \(message)"
-        }
-    }
 
-    private static func makePCMBuffer(format: AVAudioFormat, pcmBytes: Data) -> AVAudioPCMBuffer? {
-        let frameCount = AVAudioFrameCount(pcmBytes.count / 2)  // i16 = 2 bytes/frame
-        guard frameCount > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
-        else { return nil }
-        buffer.frameLength = frameCount
-        pcmBytes.withUnsafeBytes { rawPtr in
-            guard let src = rawPtr.bindMemory(to: Int16.self).baseAddress,
-                  let dest = buffer.int16ChannelData?[0]
-            else { return }
-            dest.update(from: src, count: Int(frameCount))
-        }
-        return buffer
-    }
-
-    private static func pcmData(from buffer: AVAudioPCMBuffer) -> Data {
-        if let channelData = buffer.int16ChannelData {
-            let count = Int(buffer.frameLength) * MemoryLayout<Int16>.size
-            return Data(bytes: channelData[0], count: count)
-        }
-        if let floatData = buffer.floatChannelData {
-            // PCM16-LE mono is the AudioChunk contract (Android AudioRecord
-            // parity; the Rust core parses the bytes as i16 sample pairs —
-            // see on_mic_audio_sends_input_audio_append). AVAudioEngine's
-            // input node delivers Float32, so convert; shipping the raw
-            // float bytes fed the realtime session µ-law-encoded noise
-            // (2026-07-15 hardware finding: assistant deaf after wake).
-            let frames = Int(buffer.frameLength)
-            var out = Data(count: frames * MemoryLayout<Int16>.size)
-            out.withUnsafeMutableBytes { raw in
-                let dst = raw.bindMemory(to: Int16.self)
-                let src = floatData[0]
-                for i in 0..<frames {
-                    let clamped = max(-1.0, min(1.0, src[i]))
-                    dst[i] = Int16(clamped * 32767.0)
-                }
-            }
-            return out
-        }
-        return Data()
-    }
 
     private static func writeTempFile(data: Data, ext: String) -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
@@ -2038,7 +1594,9 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
 /// `audioSessionActive` on the bridge without retaining it. The bridge
 /// registers a `weak self`-style listener via `attach`; the
 /// `SharedAudioInput` callbacks call `set`. Lock-protected.
-private final class AudioFlagHolder: @unchecked Sendable {
+// Shared with SystemAudioBridge (the extracted audio substrate), so no
+// longer file-private.
+final class AudioFlagHolder: @unchecked Sendable {
     private let lock = NSLock()
     private var listener: ((Bool) -> Void)?
 
@@ -2071,7 +1629,8 @@ private final class OneShotBox<T: Sendable>: @unchecked Sendable {
 /// Holds the `SharedAudioInput` subscription id so the stream's
 /// `onTermination` closure can unsubscribe without sharing actor-isolated
 /// state directly.
-private actor AudioSubscriptionBox {
+// Shared with SystemAudioBridge — see AudioFlagHolder.
+actor AudioSubscriptionBox {
     private var subscriptionId: UUID?
     func set(_ id: UUID) { subscriptionId = id }
     func id() -> UUID? { subscriptionId }

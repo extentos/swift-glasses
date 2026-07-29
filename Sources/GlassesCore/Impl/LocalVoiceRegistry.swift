@@ -34,6 +34,38 @@ public protocol LocalVoiceSynthesizer: Sendable {
 /// GlassesLocalVoice registers its factory here (one
 /// `ExtentosLocalVoice.register()` call in the app bootstrap).
 public enum LocalVoiceRegistry {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var instances: [String: any LocalVoiceSynthesizer] = [:]
+
     nonisolated(unsafe) public static var synthesizerFactory:
-        (@Sendable (_ voiceId: String) -> (any LocalVoiceSynthesizer)?)?
+        (@Sendable (_ voiceId: String) -> (any LocalVoiceSynthesizer)?)? {
+        didSet {
+            // Instances minted by a replaced factory are stale — drop them
+            // so the next resolve() serves the new factory's engines.
+            lock.lock()
+            instances.removeAll()
+            lock.unlock()
+        }
+    }
+
+    /// Resolve-and-memoize: ONE synthesizer instance per voice id process-
+    /// wide, so the assistant's mouth and a direct `audio.speak()` share a
+    /// loaded engine instead of holding two copies of the model in RAM.
+    /// The engine's own synthesis serialization handles the two callers.
+    /// Returns nil when no factory is registered or it doesn't claim the id.
+    public static func resolve(_ voiceId: String) -> (any LocalVoiceSynthesizer)? {
+        guard let factory = synthesizerFactory else { return nil }
+        lock.lock()
+        if let existing = instances[voiceId] {
+            lock.unlock()
+            return existing
+        }
+        lock.unlock()
+        guard let made = factory(voiceId) else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        if let raced = instances[voiceId] { return raced }
+        instances[voiceId] = made
+        return made
+    }
 }

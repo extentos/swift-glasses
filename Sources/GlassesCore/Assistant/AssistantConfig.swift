@@ -411,3 +411,34 @@ public enum AssistantError: Error, Sendable {
     /// provider's text, treat as opaque.
     case providerError(code: String, message: String)
 }
+
+extension AssistantConfig {
+    /// Copy with a different provider. Internal — used to collapse the
+    /// deprecated `.openAI` case onto `.managed` before the session is built.
+    internal func withProvider(_ newProvider: AssistantProvider) -> AssistantConfig {
+        AssistantConfig(
+            provider: newProvider,
+            instructions: instructions,
+            tools: tools,
+            startActive: startActive,
+            onWake: onWake,
+            onSleep: onSleep,
+            silenceTimeout: silenceTimeout,
+            sleepPhrases: sleepPhrases,
+            endOnIntent: endOnIntent,
+            historyCap: historyCap,
+            historyCompaction: historyCompaction,
+            compactionModel: compactionModel,
+            withinSessionMemory: withinSessionMemory,
+            persistentMemory: persistentMemory,
+            memoryUserId: memoryUserId,
+            memoryStore: memoryStore,
+            greeting: greeting,
+            wakeSoundEnabled: wakeSoundEnabled,
+            includeDeviceInfoTool: includeDeviceInfoTool,
+            deviceInfoNote: deviceInfoNote,
+            localConductFloor: localConductFloor,
+            fallbackGreeting: fallbackGreeting
+        )
+    }
+}

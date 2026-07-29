@@ -94,6 +94,14 @@ public struct ExtentosConfig: Sendable {
 public enum TransportChoice: Sendable {
     case auto
     case realMeta
+
+    /// The vendorless baseline: microphone and speaker over the phone's own
+    /// Bluetooth audio routing, no vendor SDK and no pairing flow. The full
+    /// agent runtime works; camera and display do not. Pick this explicitly for
+    /// a voice-only app, or let ``auto`` resolve to it when the app declares no
+    /// camera/display capabilities. See `SystemAudioTransport`.
+    case systemAudio
+
     case simulated(Simulated)
 
     public enum Simulated: Sendable {

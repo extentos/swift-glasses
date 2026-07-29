@@ -399,6 +399,38 @@ fileprivate class UniffiHandleMap<T> {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
+    typealias FfiType = UInt16
+    typealias SwiftType = UInt16
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt16 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -579,6 +611,312 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 
 /**
+ * Drives one Brilliant link: framing out, reassembly in.
+ */
+public protocol BrilliantCoreProtocol : AnyObject {
+    
+    /**
+     * Blank the panel.
+     */
+    func clearDisplay() throws 
+    
+    func connect(nameFilter: String?) 
+    
+    /**
+     * Which device is connected, or `None` while disconnected.
+     */
+    func device()  -> BrilliantDevice?
+    
+    func disconnect() 
+    
+    /**
+     * GATT is up. Starts the handshake — the device is not usable yet.
+     */
+    func onConnected(info: LinkInfo) 
+    
+    func onDisconnected() 
+    
+    /**
+     * One notification from the RX characteristic.
+     */
+    func onPacket(packet: Data) 
+    
+    /**
+     * Stream audio to the glasses.
+     *
+     * Slices to the link's bound because the vendor's transport drops an
+     * oversized audio packet with no error of any kind — the caller would see
+     * a successful write and silence. Refuses outright on Frame, which has no
+     * speaker, rather than writing into a characteristic that isn't there.
+     */
+    func sendAudio(pcm: Data) throws 
+    
+    /**
+     * Run a Lua string on the device. Sent unframed — "not `0x01`" is what
+     * marks the channel — so an oversized string would be silently truncated
+     * by the link rather than rejected. Split it here instead.
+     */
+    func sendLua(source: String) throws 
+    
+    /**
+     * Send a framed message, chunked to the negotiated MTU.
+     */
+    func sendMessage(code: UInt8, payload: Data) throws 
+    
+    /**
+     * Render a display tree on the connected glasses.
+     *
+     * The whole path lives here rather than in each shell: pick the panel for
+     * the connected device, lay the tree out for it (including the
+     * inscribed-square safe area a round panel needs), encode the draw batch
+     * and frame it to the link. A shell that had to do any of that would be a
+     * second place for the layout to drift.
+     *
+     * Returns what was drawn and what could not be, so the caller can tell a
+     * developer why their heading looks like body text or where their bottom
+     * row went.
+     */
+    func showDisplay(root: DisplayNode) throws  -> Rendered
+    
+}
+
+/**
+ * Drives one Brilliant link: framing out, reassembly in.
+ */
+open class BrilliantCore:
+    BrilliantCoreProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_extentos_core_fn_clone_brilliantcore(self.pointer, $0) }
+    }
+public convenience init(bridge: BleBridge, observer: BrilliantObserver) {
+    let pointer =
+        try! rustCall() {
+    uniffi_extentos_core_fn_constructor_brilliantcore_new(
+        FfiConverterCallbackInterfaceBleBridge.lower(bridge),
+        FfiConverterCallbackInterfaceBrilliantObserver.lower(observer),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_extentos_core_fn_free_brilliantcore(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Blank the panel.
+     */
+open func clearDisplay()throws  {try rustCallWithError(FfiConverterTypeBrilliantError.lift) {
+    uniffi_extentos_core_fn_method_brilliantcore_clear_display(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+open func connect(nameFilter: String?) {try! rustCall() {
+    uniffi_extentos_core_fn_method_brilliantcore_connect(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(nameFilter),$0
+    )
+}
+}
+    
+    /**
+     * Which device is connected, or `None` while disconnected.
+     */
+open func device() -> BrilliantDevice? {
+    return try!  FfiConverterOptionTypeBrilliantDevice.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_brilliantcore_device(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+open func disconnect() {try! rustCall() {
+    uniffi_extentos_core_fn_method_brilliantcore_disconnect(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
+     * GATT is up. Starts the handshake — the device is not usable yet.
+     */
+open func onConnected(info: LinkInfo) {try! rustCall() {
+    uniffi_extentos_core_fn_method_brilliantcore_on_connected(self.uniffiClonePointer(),
+        FfiConverterTypeLinkInfo.lower(info),$0
+    )
+}
+}
+    
+open func onDisconnected() {try! rustCall() {
+    uniffi_extentos_core_fn_method_brilliantcore_on_disconnected(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
+     * One notification from the RX characteristic.
+     */
+open func onPacket(packet: Data) {try! rustCall() {
+    uniffi_extentos_core_fn_method_brilliantcore_on_packet(self.uniffiClonePointer(),
+        FfiConverterData.lower(packet),$0
+    )
+}
+}
+    
+    /**
+     * Stream audio to the glasses.
+     *
+     * Slices to the link's bound because the vendor's transport drops an
+     * oversized audio packet with no error of any kind — the caller would see
+     * a successful write and silence. Refuses outright on Frame, which has no
+     * speaker, rather than writing into a characteristic that isn't there.
+     */
+open func sendAudio(pcm: Data)throws  {try rustCallWithError(FfiConverterTypeBrilliantError.lift) {
+    uniffi_extentos_core_fn_method_brilliantcore_send_audio(self.uniffiClonePointer(),
+        FfiConverterData.lower(pcm),$0
+    )
+}
+}
+    
+    /**
+     * Run a Lua string on the device. Sent unframed — "not `0x01`" is what
+     * marks the channel — so an oversized string would be silently truncated
+     * by the link rather than rejected. Split it here instead.
+     */
+open func sendLua(source: String)throws  {try rustCallWithError(FfiConverterTypeBrilliantError.lift) {
+    uniffi_extentos_core_fn_method_brilliantcore_send_lua(self.uniffiClonePointer(),
+        FfiConverterString.lower(source),$0
+    )
+}
+}
+    
+    /**
+     * Send a framed message, chunked to the negotiated MTU.
+     */
+open func sendMessage(code: UInt8, payload: Data)throws  {try rustCallWithError(FfiConverterTypeBrilliantError.lift) {
+    uniffi_extentos_core_fn_method_brilliantcore_send_message(self.uniffiClonePointer(),
+        FfiConverterUInt8.lower(code),
+        FfiConverterData.lower(payload),$0
+    )
+}
+}
+    
+    /**
+     * Render a display tree on the connected glasses.
+     *
+     * The whole path lives here rather than in each shell: pick the panel for
+     * the connected device, lay the tree out for it (including the
+     * inscribed-square safe area a round panel needs), encode the draw batch
+     * and frame it to the link. A shell that had to do any of that would be a
+     * second place for the layout to drift.
+     *
+     * Returns what was drawn and what could not be, so the caller can tell a
+     * developer why their heading looks like body text or where their bottom
+     * row went.
+     */
+open func showDisplay(root: DisplayNode)throws  -> Rendered {
+    return try  FfiConverterTypeRendered.lift(try rustCallWithError(FfiConverterTypeBrilliantError.lift) {
+    uniffi_extentos_core_fn_method_brilliantcore_show_display(self.uniffiClonePointer(),
+        FfiConverterTypeDisplayNode.lower(root),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBrilliantCore: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = BrilliantCore
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> BrilliantCore {
+        return BrilliantCore(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: BrilliantCore) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BrilliantCore {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: BrilliantCore, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBrilliantCore_lift(_ pointer: UnsafeMutableRawPointer) throws -> BrilliantCore {
+    return try FfiConverterTypeBrilliantCore.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBrilliantCore_lower(_ value: BrilliantCore) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeBrilliantCore.lower(value)
+}
+
+
+
+
+/**
  * The migrated BrowserSim protocol state machine. One per shell
  * `BrowserSimTransport`.
  */
@@ -649,6 +987,15 @@ public protocol BrowserSimCoreProtocol : AnyObject {
      * Backs the shell's `GlassesTransport.currentDeviceModelId()`.
      */
     func deviceModelId()  -> String?
+    
+    /**
+     * The session's current device VENDOR wire id ("meta", …) — the vendor
+     * half of the identity dial, catalog-resolved by the backend and captured
+     * from the same frames as `device_model_id`. `None` until a vendor-aware
+     * backend delivers it. Backs the shell's
+     * `GlassesTransport.currentVendorId()`.
+     */
+    func deviceVendor()  -> String?
     
     /**
      * End the session at the customer's request.
@@ -995,6 +1342,20 @@ open func currentSessionUrl() -> String? {
 open func deviceModelId() -> String? {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_extentos_core_fn_method_browsersimcore_device_model_id(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * The session's current device VENDOR wire id ("meta", …) — the vendor
+     * half of the identity dial, catalog-resolved by the backend and captured
+     * from the same frames as `device_model_id`. `None` until a vendor-aware
+     * backend delivers it. Backs the shell's
+     * `GlassesTransport.currentVendorId()`.
+     */
+open func deviceVendor() -> String? {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_browsersimcore_device_vendor(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -3292,8 +3653,9 @@ public protocol SoundRegistryProtocol : AnyObject {
     
     /**
      * Resolve a name to volume-scaled PCM, or None when unregistered.
-     * Volume is clamped to [0, 1] and applied per-sample here so both
-     * shells stay byte-identical; 1.0 returns the registered bytes as-is.
+     * Scaling is the one shared PCM gain grammar (`speak::scale_pcm16_gain`)
+     * so both shells — and the direct-speak path — stay byte-identical;
+     * 1.0 returns the registered bytes as-is.
      */
     func resolve(name: String, volume: Float)  -> SoundPcm?
     
@@ -3393,8 +3755,9 @@ open func remove(name: String) {try! rustCall() {
     
     /**
      * Resolve a name to volume-scaled PCM, or None when unregistered.
-     * Volume is clamped to [0, 1] and applied per-sample here so both
-     * shells stay byte-identical; 1.0 returns the registered bytes as-is.
+     * Scaling is the one shared PCM gain grammar (`speak::scale_pcm16_gain`)
+     * so both shells — and the direct-speak path — stay byte-identical;
+     * 1.0 returns the registered bytes as-is.
      */
 open func resolve(name: String, volume: Float) -> SoundPcm? {
     return try!  FfiConverterOptionTypeSoundPcm.lift(try! rustCall() {
@@ -3853,9 +4216,13 @@ public func FfiConverterTypeVoiceCore_lower(_ value: VoiceCore) -> UnsafeMutable
 
 /**
  * A pickable realtime model. `reasoning_capable` marks whether the model
- * accepts the `reasoning.effort` session knob — only `gpt-realtime-2` today.
- * The session builder OMITS the knob when false so the provider doesn't
- * reject the whole session ("Unsupported option for this model").
+ * accepts the `reasoning.effort` session knob — the OpenAI 2.x reasoning line
+ * (`gpt-realtime-2`, `gpt-realtime-2.1`, `gpt-realtime-2.1-mini`) plus both
+ * Gemini Live models. The session builder OMITS the knob when false so the
+ * provider doesn't reject the whole session ("Unsupported option for this
+ * model"). NOTE: 2.1-mini IS reasoning-capable even though the older
+ * `gpt-realtime-mini` is not — it's a distilled reasoning model, not a
+ * re-skin of mini. Don't infer this flag from the name.
  */
 public struct AssistantModel {
     public var id: String
@@ -5934,6 +6301,107 @@ public func FfiConverterTypeInterruptionConfig_lower(_ value: InterruptionConfig
 
 
 /**
+ * What the shell learned when the GATT connection came up.
+ */
+public struct LinkInfo {
+    /**
+     * Negotiated ATT MTU. Every payload bound derives from this, so the shell
+     * must report the real negotiated value rather than the 23-byte default it
+     * started from.
+     */
+    public var mtu: UInt16
+    /**
+     * Whether the audio-out characteristic (`…0005`) is present. Halo has it,
+     * Frame does not.
+     */
+    public var hasAudioOut: Bool
+    /**
+     * BLE local name, for display.
+     */
+    public var name: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Negotiated ATT MTU. Every payload bound derives from this, so the shell
+         * must report the real negotiated value rather than the 23-byte default it
+         * started from.
+         */mtu: UInt16, 
+        /**
+         * Whether the audio-out characteristic (`…0005`) is present. Halo has it,
+         * Frame does not.
+         */hasAudioOut: Bool, 
+        /**
+         * BLE local name, for display.
+         */name: String?) {
+        self.mtu = mtu
+        self.hasAudioOut = hasAudioOut
+        self.name = name
+    }
+}
+
+
+
+extension LinkInfo: Equatable, Hashable {
+    public static func ==(lhs: LinkInfo, rhs: LinkInfo) -> Bool {
+        if lhs.mtu != rhs.mtu {
+            return false
+        }
+        if lhs.hasAudioOut != rhs.hasAudioOut {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(mtu)
+        hasher.combine(hasAudioOut)
+        hasher.combine(name)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLinkInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LinkInfo {
+        return
+            try LinkInfo(
+                mtu: FfiConverterUInt16.read(from: &buf), 
+                hasAudioOut: FfiConverterBool.read(from: &buf), 
+                name: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LinkInfo, into buf: inout [UInt8]) {
+        FfiConverterUInt16.write(value.mtu, into: &buf)
+        FfiConverterBool.write(value.hasAudioOut, into: &buf)
+        FfiConverterOptionString.write(value.name, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkInfo_lift(_ buf: RustBuffer) throws -> LinkInfo {
+    return try FfiConverterTypeLinkInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkInfo_lower(_ value: LinkInfo) -> RustBuffer {
+    return FfiConverterTypeLinkInfo.lower(value)
+}
+
+
+/**
  * One rung of a platform's local model ladder, as the shell sees it.
  *
  * The shell owns the catalog (Android `LocalModels.ALL`, iOS the MLX
@@ -6767,6 +7235,101 @@ public func FfiConverterTypePageTypographyTokens_lower(_ value: PageTypographyTo
 
 
 /**
+ * The surface being drawn onto.
+ */
+public struct Panel {
+    public var width: UInt32
+    public var height: UInt32
+    public var shape: PanelShape
+    /**
+     * Whether filled rectangles are available. Halo has `frame.display.rect`;
+     * FRAME HAS ONLY text and bitmap, so card backgrounds, button boxes and
+     * focus rings have no primitive there and are dropped rather than faked.
+     */
+    public var hasRect: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(width: UInt32, height: UInt32, shape: PanelShape, 
+        /**
+         * Whether filled rectangles are available. Halo has `frame.display.rect`;
+         * FRAME HAS ONLY text and bitmap, so card backgrounds, button boxes and
+         * focus rings have no primitive there and are dropped rather than faked.
+         */hasRect: Bool) {
+        self.width = width
+        self.height = height
+        self.shape = shape
+        self.hasRect = hasRect
+    }
+}
+
+
+
+extension Panel: Equatable, Hashable {
+    public static func ==(lhs: Panel, rhs: Panel) -> Bool {
+        if lhs.width != rhs.width {
+            return false
+        }
+        if lhs.height != rhs.height {
+            return false
+        }
+        if lhs.shape != rhs.shape {
+            return false
+        }
+        if lhs.hasRect != rhs.hasRect {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(width)
+        hasher.combine(height)
+        hasher.combine(shape)
+        hasher.combine(hasRect)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePanel: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Panel {
+        return
+            try Panel(
+                width: FfiConverterUInt32.read(from: &buf), 
+                height: FfiConverterUInt32.read(from: &buf), 
+                shape: FfiConverterTypePanelShape.read(from: &buf), 
+                hasRect: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Panel, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.width, into: &buf)
+        FfiConverterUInt32.write(value.height, into: &buf)
+        FfiConverterTypePanelShape.write(value.shape, into: &buf)
+        FfiConverterBool.write(value.hasRect, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePanel_lift(_ buf: RustBuffer) throws -> Panel {
+    return try FfiConverterTypePanel.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePanel_lower(_ value: Panel) -> RustBuffer {
+    return FfiConverterTypePanel.lower(value)
+}
+
+
+/**
  * A captured still photo. `exif` crosses the FFI as an opaque serialised JSON
  * `String` (the migration-wide JSON policy); each shell parses it natively.
  */
@@ -7167,6 +7730,125 @@ public func FfiConverterTypeRealtimeToolDef_lift(_ buf: RustBuffer) throws -> Re
 #endif
 public func FfiConverterTypeRealtimeToolDef_lower(_ value: RealtimeToolDef) -> RustBuffer {
     return FfiConverterTypeRealtimeToolDef.lower(value)
+}
+
+
+/**
+ * The result of translating a tree for a panel.
+ */
+public struct Rendered {
+    public var items: [DrawItem]
+    /**
+     * Pixels of content that did not fit. Trees CLIP rather than scroll on
+     * every vendor; reporting the amount lets the caller say so rather than
+     * leaving a developer to discover it on the glasses.
+     */
+    public var clippedPx: UInt32
+    /**
+     * Node kinds this device cannot render at all, for the same reason.
+     */
+    public var unsupported: [String]
+    /**
+     * The first selectable node in source order.
+     *
+     * Brilliant's hardware cannot traverse focus — Halo has a button and an
+     * IMU tap but no swipe of any kind, and Frame has only the tap. So there
+     * is no "move to the next element": whatever this names is what a press
+     * acts on. An app that wants more than one action per screen has to say so
+     * with separate screens.
+     */
+    public var firstInteractiveId: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(items: [DrawItem], 
+        /**
+         * Pixels of content that did not fit. Trees CLIP rather than scroll on
+         * every vendor; reporting the amount lets the caller say so rather than
+         * leaving a developer to discover it on the glasses.
+         */clippedPx: UInt32, 
+        /**
+         * Node kinds this device cannot render at all, for the same reason.
+         */unsupported: [String], 
+        /**
+         * The first selectable node in source order.
+         *
+         * Brilliant's hardware cannot traverse focus — Halo has a button and an
+         * IMU tap but no swipe of any kind, and Frame has only the tap. So there
+         * is no "move to the next element": whatever this names is what a press
+         * acts on. An app that wants more than one action per screen has to say so
+         * with separate screens.
+         */firstInteractiveId: String?) {
+        self.items = items
+        self.clippedPx = clippedPx
+        self.unsupported = unsupported
+        self.firstInteractiveId = firstInteractiveId
+    }
+}
+
+
+
+extension Rendered: Equatable, Hashable {
+    public static func ==(lhs: Rendered, rhs: Rendered) -> Bool {
+        if lhs.items != rhs.items {
+            return false
+        }
+        if lhs.clippedPx != rhs.clippedPx {
+            return false
+        }
+        if lhs.unsupported != rhs.unsupported {
+            return false
+        }
+        if lhs.firstInteractiveId != rhs.firstInteractiveId {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(items)
+        hasher.combine(clippedPx)
+        hasher.combine(unsupported)
+        hasher.combine(firstInteractiveId)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRendered: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Rendered {
+        return
+            try Rendered(
+                items: FfiConverterSequenceTypeDrawItem.read(from: &buf), 
+                clippedPx: FfiConverterUInt32.read(from: &buf), 
+                unsupported: FfiConverterSequenceString.read(from: &buf), 
+                firstInteractiveId: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Rendered, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeDrawItem.write(value.items, into: &buf)
+        FfiConverterUInt32.write(value.clippedPx, into: &buf)
+        FfiConverterSequenceString.write(value.unsupported, into: &buf)
+        FfiConverterOptionString.write(value.firstInteractiveId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRendered_lift(_ buf: RustBuffer) throws -> Rendered {
+    return try FfiConverterTypeRendered.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRendered_lower(_ value: Rendered) -> RustBuffer {
+    return FfiConverterTypeRendered.lower(value)
 }
 
 
@@ -8946,6 +9628,169 @@ extension BridgeLogLevel: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * Which Brilliant device is on the other end.
+ *
+ * Determined by whether the audio-out characteristic is present, which is what
+ * the vendor's own SDK does — there is no model string to read. It matters
+ * beyond naming: Frame has no speaker, so `speak` has nowhere to go.
+ */
+
+public enum BrilliantDevice {
+    
+    /**
+     * 256x256 round display, camera, mics, speaker, button.
+     */
+    case halo
+    /**
+     * 640x400 display, camera, mic, one tap gesture, NO speaker.
+     */
+    case frame
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBrilliantDevice: FfiConverterRustBuffer {
+    typealias SwiftType = BrilliantDevice
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BrilliantDevice {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .halo
+        
+        case 2: return .frame
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BrilliantDevice, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .halo:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .frame:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBrilliantDevice_lift(_ buf: RustBuffer) throws -> BrilliantDevice {
+    return try FfiConverterTypeBrilliantDevice.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBrilliantDevice_lower(_ value: BrilliantDevice) -> RustBuffer {
+    return FfiConverterTypeBrilliantDevice.lower(value)
+}
+
+
+
+extension BrilliantDevice: Equatable, Hashable {}
+
+
+
+
+/**
+ * Display and Error are hand-written rather than derived: the crate carries no
+ * `thiserror` dependency, and one enum is not worth adding one to the FFI
+ * build for every platform.
+ */
+public enum BrilliantError {
+
+    
+    
+    case NotConnected
+    /**
+     * Brilliant Frame. Not a failure to route audio — the hardware has no
+     * speaker at all.
+     */
+    case NoSpeaker
+    case PayloadTooLarge(size: UInt32
+    )
+    case MtuTooSmall(mtu: UInt16
+    )
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBrilliantError: FfiConverterRustBuffer {
+    typealias SwiftType = BrilliantError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BrilliantError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .NotConnected
+        case 2: return .NoSpeaker
+        case 3: return .PayloadTooLarge(
+            size: try FfiConverterUInt32.read(from: &buf)
+            )
+        case 4: return .MtuTooSmall(
+            mtu: try FfiConverterUInt16.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BrilliantError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case .NotConnected:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .NoSpeaker:
+            writeInt(&buf, Int32(2))
+        
+        
+        case let .PayloadTooLarge(size):
+            writeInt(&buf, Int32(3))
+            FfiConverterUInt32.write(size, into: &buf)
+            
+        
+        case let .MtuTooSmall(mtu):
+            writeInt(&buf, Int32(4))
+            FfiConverterUInt16.write(mtu, into: &buf)
+            
+        }
+    }
+}
+
+
+extension BrilliantError: Equatable, Hashable {}
+
+extension BrilliantError: Foundation.LocalizedError {
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * Button emphasis. Mirrors Meta `ButtonStyle`.
  */
 
@@ -9544,6 +10389,77 @@ public func FfiConverterTypeCaptureVideoResult_lower(_ value: CaptureVideoResult
 
 
 extension CaptureVideoResult: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ClickAction {
+    
+    case single
+    case double
+    case long
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeClickAction: FfiConverterRustBuffer {
+    typealias SwiftType = ClickAction
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ClickAction {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .single
+        
+        case 2: return .double
+        
+        case 3: return .long
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ClickAction, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .single:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .double:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .long:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeClickAction_lift(_ buf: RustBuffer) throws -> ClickAction {
+    return try FfiConverterTypeClickAction.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeClickAction_lower(_ value: ClickAction) -> RustBuffer {
+    return FfiConverterTypeClickAction.lower(value)
+}
+
+
+
+extension ClickAction: Equatable, Hashable {}
 
 
 
@@ -10820,7 +11736,18 @@ public enum DeviceType {
      */
     case metaGlasses
     case metaOrion
-    case mentraG1
+    /**
+     * Android XR projected audio glasses (vendor `android_xr`; the fall-2026
+     * Samsung-built line — camera + mic + speaker, no display). Preview: no
+     * shipping hardware yet; produced by the `:glasses-xr` ProjectedXrTransport.
+     */
+    case androidXrAudioGlasses
+    /**
+     * Android XR projected display glasses (vendor `android_xr`; the rumored
+     * 2027 display follow-on — adds a Glimmer display). Preview identity only;
+     * no transport produces it yet.
+     */
+    case androidXrDisplayGlasses
     case unknown
 }
 
@@ -10849,9 +11776,11 @@ public struct FfiConverterTypeDeviceType: FfiConverterRustBuffer {
         
         case 7: return .metaOrion
         
-        case 8: return .mentraG1
+        case 8: return .androidXrAudioGlasses
         
-        case 9: return .unknown
+        case 9: return .androidXrDisplayGlasses
+        
+        case 10: return .unknown
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -10889,12 +11818,16 @@ public struct FfiConverterTypeDeviceType: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
         
         
-        case .mentraG1:
+        case .androidXrAudioGlasses:
             writeInt(&buf, Int32(8))
         
         
-        case .unknown:
+        case .androidXrDisplayGlasses:
             writeInt(&buf, Int32(9))
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(10))
         
         }
     }
@@ -11383,6 +12316,86 @@ public func FfiConverterTypeDisplayNode_lower(_ value: DisplayNode) -> RustBuffe
 
 
 extension DisplayNode: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * One drawing instruction, already positioned.
+ */
+
+public enum DrawItem {
+    
+    case text(x: UInt32, y: UInt32, color: UInt32, text: String
+    )
+    case rect(x: UInt32, y: UInt32, w: UInt32, h: UInt32, color: UInt32
+    )
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDrawItem: FfiConverterRustBuffer {
+    typealias SwiftType = DrawItem
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DrawItem {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .text(x: try FfiConverterUInt32.read(from: &buf), y: try FfiConverterUInt32.read(from: &buf), color: try FfiConverterUInt32.read(from: &buf), text: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .rect(x: try FfiConverterUInt32.read(from: &buf), y: try FfiConverterUInt32.read(from: &buf), w: try FfiConverterUInt32.read(from: &buf), h: try FfiConverterUInt32.read(from: &buf), color: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DrawItem, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .text(x,y,color,text):
+            writeInt(&buf, Int32(1))
+            FfiConverterUInt32.write(x, into: &buf)
+            FfiConverterUInt32.write(y, into: &buf)
+            FfiConverterUInt32.write(color, into: &buf)
+            FfiConverterString.write(text, into: &buf)
+            
+        
+        case let .rect(x,y,w,h,color):
+            writeInt(&buf, Int32(2))
+            FfiConverterUInt32.write(x, into: &buf)
+            FfiConverterUInt32.write(y, into: &buf)
+            FfiConverterUInt32.write(w, into: &buf)
+            FfiConverterUInt32.write(h, into: &buf)
+            FfiConverterUInt32.write(color, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDrawItem_lift(_ buf: RustBuffer) throws -> DrawItem {
+    return try FfiConverterTypeDrawItem.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDrawItem_lower(_ value: DrawItem) -> RustBuffer {
+    return FfiConverterTypeDrawItem.lower(value)
+}
+
+
+
+extension DrawItem: Equatable, Hashable {}
 
 
 
@@ -12661,6 +13674,166 @@ public func FfiConverterTypeLifecycleOp_lower(_ value: LifecycleOp) -> RustBuffe
 
 
 extension LifecycleOp: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum LinkState {
+    
+    case disconnected
+    case connecting
+    /**
+     * GATT is up, but the device is not yet running our bundle — it
+     * understands no message codes and forwards no events. Deliberately
+     * distinct from [`LinkState::Ready`]: treating "connected" as "usable"
+     * is the mistake this state exists to prevent.
+     */
+    case connected
+    /**
+     * The bundle is running and the device is answering. This is the state an
+     * app should wait for.
+     */
+    case ready
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLinkState: FfiConverterRustBuffer {
+    typealias SwiftType = LinkState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LinkState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .disconnected
+        
+        case 2: return .connecting
+        
+        case 3: return .connected
+        
+        case 4: return .ready
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LinkState, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .disconnected:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .connecting:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .connected:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .ready:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkState_lift(_ buf: RustBuffer) throws -> LinkState {
+    return try FfiConverterTypeLinkState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkState_lower(_ value: LinkState) -> RustBuffer {
+    return FfiConverterTypeLinkState.lower(value)
+}
+
+
+
+extension LinkState: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Physical panel shape.
+ */
+
+public enum PanelShape {
+    
+    case rect
+    /**
+     * Brilliant Halo. The usable region is the inscribed square, not the
+     * bounding box — a full-width row laid out to the panel width loses both
+     * of its ends.
+     */
+    case circle
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePanelShape: FfiConverterRustBuffer {
+    typealias SwiftType = PanelShape
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PanelShape {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .rect
+        
+        case 2: return .circle
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PanelShape, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .rect:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .circle:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePanelShape_lift(_ buf: RustBuffer) throws -> PanelShape {
+    return try FfiConverterTypePanelShape.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePanelShape_lower(_ value: PanelShape) -> RustBuffer {
+    return FfiConverterTypePanelShape.lower(value)
+}
+
+
+
+extension PanelShape: Equatable, Hashable {}
 
 
 
@@ -14104,6 +15277,82 @@ extension SpeakResult: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * Where a direct `audio.speak()` call routes for the configured voice.
+ */
+
+public enum SpeakRoute {
+    
+    /**
+     * Feed the resolved local synthesizer and stream its PCM through the
+     * transport's outgoing-audio path (the pipe the assistant's voice
+     * rides — HFP-routed on hardware, WebAudio in the browser sim).
+     */
+    case localSynth
+    /**
+     * The platform TTS engine (Android `TextToSpeech`, iOS
+     * `AVSpeechSynthesizer`) — the system voice.
+     */
+    case systemTts
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSpeakRoute: FfiConverterRustBuffer {
+    typealias SwiftType = SpeakRoute
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SpeakRoute {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .localSynth
+        
+        case 2: return .systemTts
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SpeakRoute, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .localSynth:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .systemTts:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSpeakRoute_lift(_ buf: RustBuffer) throws -> SpeakRoute {
+    return try FfiConverterTypeSpeakRoute.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSpeakRoute_lower(_ value: SpeakRoute) -> RustBuffer {
+    return FfiConverterTypeSpeakRoute.lower(value)
+}
+
+
+
+extension SpeakRoute: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * The normalized stream-session vocabulary (R5) — adopts Android's richer
  * shape. iOS shell synthesizes `Streaming` from "first videoFrame arrived"
  * or equivalent SDK signal.
@@ -14763,6 +16012,35 @@ public enum TransportChosen {
     case realMeta
     case browserSim
     case localSim
+    /**
+     * Android XR projected transport (`:glasses-xr` ProjectedXrTransport,
+     * vendor `android_xr`). Preview — resolves only when the host app
+     * explicitly registered the XR module AND a projected device
+     * association exists.
+     */
+    case projectedXr
+    /**
+     * The vendorless baseline: mic + speaker over the OS's own Bluetooth
+     * audio routing, no vendor SDK in the path. Serves voice apps on ANY
+     * hands-free smart glasses (including Ray-Bans, whose audio never went
+     * through DAT either). No camera, no display — those are what a vendor
+     * transport adds on top.
+     */
+    case systemAudio
+    /**
+     * Brilliant Labs BLE transport (`:glasses-brilliant` BrilliantTransport,
+     * vendor `brilliant`). Preview — resolves only when the host app
+     * explicitly registered the Brilliant module. Deliberately NOT reachable
+     * by scanning during `Auto` resolution: nothing here has run on hardware,
+     * and an app should never fall into an unverified transport by accident.
+     *
+     * Note the contrast with SystemAudio above: that one reaches Brilliant's
+     * AUDIO on nothing but OS Bluetooth routing for most vendors — but NOT
+     * this one. Brilliant's audio runs over a custom GATT characteristic, so a
+     * Halo never appears as a system headset and the vendorless path cannot
+     * see it.
+     */
+    case brilliantBle
 }
 
 
@@ -14782,6 +16060,12 @@ public struct FfiConverterTypeTransportChosen: FfiConverterRustBuffer {
         
         case 3: return .localSim
         
+        case 4: return .projectedXr
+        
+        case 5: return .systemAudio
+        
+        case 6: return .brilliantBle
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -14800,6 +16084,18 @@ public struct FfiConverterTypeTransportChosen: FfiConverterRustBuffer {
         
         case .localSim:
             writeInt(&buf, Int32(3))
+        
+        
+        case .projectedXr:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .systemAudio:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .brilliantBle:
+            writeInt(&buf, Int32(6))
         
         }
     }
@@ -15069,6 +16365,13 @@ public enum TransportSelectionSource {
     case fallbackDefault
     case explicitConfig
     case pairing
+    /**
+     * A host-registered vendor transport factory claimed the connection
+     * (vendor axis: e.g. `ExtentosXr.register()` + a live projected
+     * device association). Registration is explicit opt-in, so an
+     * unregistered build can never resolve here.
+     */
+    case vendorRegistry
 }
 
 
@@ -15093,6 +16396,8 @@ public struct FfiConverterTypeTransportSelectionSource: FfiConverterRustBuffer {
         case 5: return .explicitConfig
         
         case 6: return .pairing
+        
+        case 7: return .vendorRegistry
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -15124,6 +16429,10 @@ public struct FfiConverterTypeTransportSelectionSource: FfiConverterRustBuffer {
         
         case .pairing:
             writeInt(&buf, Int32(6))
+        
+        
+        case .vendorRegistry:
+            writeInt(&buf, Int32(7))
         
         }
     }
@@ -15305,6 +16614,497 @@ fileprivate struct FfiConverterCallbackInterfaceAudioChunkSink {
 #endif
 extension FfiConverterCallbackInterfaceAudioChunkSink : FfiConverter {
     typealias SwiftType = AudioChunkSink
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+
+
+/**
+ * The BLE socket, implemented by each platform shell.
+ *
+ * Everything is fire-and-forget: BLE writes are asynchronous and the device
+ * answers on the notify characteristic, not by returning, so a request/response
+ * shape here would be a lie about the transport.
+ */
+public protocol BleBridge : AnyObject {
+    
+    /**
+     * Scan for a peripheral advertising service `7a230001-…` and connect.
+     * `name_filter` matches the BLE local name (e.g. "Halo AB") when the user
+     * is picking between several in range.
+     */
+    func connect(nameFilter: String?) 
+    
+    /**
+     * Write one packet to the TX characteristic (`…0002`). Already framed —
+     * write the bytes verbatim.
+     */
+    func writeTx(packet: Data) 
+    
+    /**
+     * Write one packet to the audio-out characteristic (`…0005`).
+     *
+     * Halo only, and already sliced to fit: the core guarantees the bound
+     * because the vendor's transport drops an oversized audio packet silently.
+     */
+    func writeAudio(packet: Data) 
+    
+    func disconnect() 
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceBleBridge {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    static var vtable: UniffiVTableCallbackInterfaceBleBridge = UniffiVTableCallbackInterfaceBleBridge(
+        connect: { (
+            uniffiHandle: UInt64,
+            nameFilter: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBleBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.connect(
+                     nameFilter: try FfiConverterOptionString.lift(nameFilter)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        writeTx: { (
+            uniffiHandle: UInt64,
+            packet: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBleBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.writeTx(
+                     packet: try FfiConverterData.lift(packet)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        writeAudio: { (
+            uniffiHandle: UInt64,
+            packet: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBleBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.writeAudio(
+                     packet: try FfiConverterData.lift(packet)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        disconnect: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBleBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.disconnect(
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceBleBridge.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface BleBridge: handle missing in uniffiFree")
+            }
+        }
+    )
+}
+
+private func uniffiCallbackInitBleBridge() {
+    uniffi_extentos_core_fn_init_callback_vtable_blebridge(&UniffiCallbackInterfaceBleBridge.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceBleBridge {
+    fileprivate static var handleMap = UniffiHandleMap<BleBridge>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceBleBridge : FfiConverter {
+    typealias SwiftType = BleBridge
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+
+
+/**
+ * Decoded device events, delivered to the shell.
+ */
+public protocol BrilliantObserver : AnyObject {
+    
+    func onStateChanged(state: LinkState) 
+    
+    func onPhoto(jpeg: Data) 
+    
+    func onAudio(pcm: Data) 
+    
+    func onTap() 
+    
+    func onClick(kind: ClickAction) 
+    
+    func onImu(data: Data) 
+    
+    /**
+     * Lua `print` output — diagnostics, and how the device reports Lua errors.
+     *
+     * Only delivered once the link is [`LinkState::Ready`]. During the
+     * handshake the print channel carries acknowledgements, and forwarding
+     * those as logs would bury the one line that matters if it fails.
+     */
+    func onDeviceLog(line: String) 
+    
+    /**
+     * The bundle could not be installed or started. The link is still up, but
+     * it is mute — worth surfacing rather than leaving an app waiting on a
+     * `Ready` that will never arrive.
+     */
+    func onHandshakeFailed(reason: String) 
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceBrilliantObserver {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    static var vtable: UniffiVTableCallbackInterfaceBrilliantObserver = UniffiVTableCallbackInterfaceBrilliantObserver(
+        onStateChanged: { (
+            uniffiHandle: UInt64,
+            state: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onStateChanged(
+                     state: try FfiConverterTypeLinkState.lift(state)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        onPhoto: { (
+            uniffiHandle: UInt64,
+            jpeg: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onPhoto(
+                     jpeg: try FfiConverterData.lift(jpeg)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        onAudio: { (
+            uniffiHandle: UInt64,
+            pcm: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onAudio(
+                     pcm: try FfiConverterData.lift(pcm)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        onTap: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onTap(
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        onClick: { (
+            uniffiHandle: UInt64,
+            kind: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onClick(
+                     kind: try FfiConverterTypeClickAction.lift(kind)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        onImu: { (
+            uniffiHandle: UInt64,
+            data: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onImu(
+                     data: try FfiConverterData.lift(data)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        onDeviceLog: { (
+            uniffiHandle: UInt64,
+            line: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onDeviceLog(
+                     line: try FfiConverterString.lift(line)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        onHandshakeFailed: { (
+            uniffiHandle: UInt64,
+            reason: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onHandshakeFailed(
+                     reason: try FfiConverterString.lift(reason)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface BrilliantObserver: handle missing in uniffiFree")
+            }
+        }
+    )
+}
+
+private func uniffiCallbackInitBrilliantObserver() {
+    uniffi_extentos_core_fn_init_callback_vtable_brilliantobserver(&UniffiCallbackInterfaceBrilliantObserver.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceBrilliantObserver {
+    fileprivate static var handleMap = UniffiHandleMap<BrilliantObserver>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceBrilliantObserver : FfiConverter {
+    typealias SwiftType = BrilliantObserver
     typealias FfiType = UInt64
 
 #if swift(>=5.8)
@@ -18032,6 +19832,30 @@ fileprivate struct FfiConverterOptionTypeSoundPcm: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeBrilliantDevice: FfiConverterRustBuffer {
+    typealias SwiftType = BrilliantDevice?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBrilliantDevice.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBrilliantDevice.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeConnectError: FfiConverterRustBuffer {
     typealias SwiftType = ConnectError?
 
@@ -18404,6 +20228,31 @@ fileprivate struct FfiConverterSequenceTypeDisplayNode: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeDrawItem: FfiConverterRustBuffer {
+    typealias SwiftType = [DrawItem]
+
+    public static func write(_ value: [DrawItem], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDrawItem.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DrawItem] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DrawItem]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDrawItem.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeRealtimeTurn: FfiConverterRustBuffer {
     typealias SwiftType = [RealtimeTurn]
 
@@ -18653,10 +20502,10 @@ public func capabilityLabel(kind: DeclaredCapability) -> String {
 }
 /**
  * Identity-derived profile for a known device type. Must stay aligned with
- * `device-registry/glasses-models.json` (`display` flags) — the sim path
+ * `device-registry/glasses-models.json` (capability sets) — the sim path
  * resolves capability from that catalog over the wire; this is the DAT
- * (real-hardware) path's source. Orion and Mentra G1 aren't in the sim
- * catalog but are display hardware; `Unknown` never claims a screen.
+ * (real-hardware) path's source. Orion isn't in the sim catalog but is
+ * display hardware; `Unknown` never claims a screen.
  */
 public func capabilityProfileForDevice(device: DeviceType) -> DeviceCapabilitySet {
     return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
@@ -18914,6 +20763,20 @@ public func devicePageLabel(modelId: String?) -> String? {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_device_page_label(
         FfiConverterOptionString.lower(modelId),$0
+    )
+})
+}
+/**
+ * Vendor wire id for a device identity — the vendor half of the identity
+ * dial (`DeviceInfo.vendor` vocabulary; canonical tokens `"meta"` /
+ * `"android_xr"`, decided 2026-07-24). Lives beside [`device_type_wire_id`]
+ * so a new variant cannot ship without declaring its vendor; both shells
+ * derive vendor identity from this instead of hardcoding `"meta"`.
+ */
+public func deviceTypeVendor(deviceType: DeviceType) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_device_type_vendor(
+        FfiConverterTypeDeviceType.lower(deviceType),$0
     )
 })
 }
@@ -19208,10 +21071,9 @@ public func memoryProfileRender(profileJson: String?) -> String? {
 })
 }
 /**
- * The Meta-lineup capability profile: camera/microphone/speaker are true
- * across every current model (the pairing floor); display is the one live
- * dial. The shells feed `display_capable` from the transport — this was
- * duplicated twice in the Kotlin root before the hoist.
+ * The Meta-lineup capability profile. Kept as a stable export for existing
+ * shell call sites (iOS still calls it — migration ledger item); new code
+ * routes through [`vendor_capability_profile`] with the transport's vendor.
  */
 public func metaCapabilityProfile(displayCapable: Bool) -> DeviceCapabilitySet {
     return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
@@ -19353,6 +21215,60 @@ public func resolveCapabilityTiles(footprint: [DeclaredCapability], device: Devi
 })
 }
 /**
+ * Route a direct speak call.
+ *
+ * `synth_resolved`: the voice registry's factory returned a synthesizer
+ * for this id (the factory owns the id→engine mapping — a customer
+ * factory may claim ids the built-in Kokoro table doesn't).
+ * `synth_ready`: that synthesizer reports its engine + model loaded.
+ *
+ * `None`, `""` and `"system"` are always the platform voice. An id no
+ * registered factory claims serves the system voice (the b23
+ * unknown-id contract), as does a claimed-but-not-ready engine
+ * (serve-until-ready) — never an error, never silence.
+ */
+public func resolveSpeakRoute(voiceId: String?, synthResolved: Bool, synthReady: Bool) -> SpeakRoute {
+    return try!  FfiConverterTypeSpeakRoute.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_resolve_speak_route(
+        FfiConverterOptionString.lower(voiceId),
+        FfiConverterBool.lower(synthResolved),
+        FfiConverterBool.lower(synthReady),$0
+    )
+})
+}
+/**
+ * Scale mono PCM16-LE bytes by a gain in `[0, 1]` — `SpeakConfig.volume`
+ * applied to a synthesized chunk. Gain is clamped (no amplification, no
+ * negative phase-flip); `1.0` returns the bytes untouched. A dangling odd
+ * byte (malformed input) is dropped, matching the named-sound registry.
+ */
+public func scalePcm16Gain(pcm: Data, gain: Float) -> Data {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_scale_pcm16_gain(
+        FfiConverterData.lower(pcm),
+        FfiConverterFloat.lower(gain),$0
+    )
+})
+}
+/**
+ * Milliseconds a caller still has to wait after a local synthesis returned,
+ * so it doesn't report completion (or start the next utterance) while the
+ * tail of the audio is still in the transport's buffer:
+ * `audio duration − elapsed synthesis time + tail pad`, floored at zero.
+ *
+ * Faster-than-realtime synthesis (the normal case) yields a positive
+ * remainder; a degenerate duration (NaN/∞/≤0) yields zero — the caller
+ * just returns.
+ */
+public func speakPlaybackRemainderMs(audioSeconds: Double, elapsedMs: Int64) -> Int64 {
+    return try!  FfiConverterInt64.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_speak_playback_remainder_ms(
+        FfiConverterDouble.lower(audioSeconds),
+        FfiConverterInt64.lower(elapsedMs),$0
+    )
+})
+}
+/**
  * Kill-switch grammar: unset (None) or malformed → TRUE; only an explicit
  * `false` returns false.
  */
@@ -19397,6 +21313,23 @@ public func transcriptionGateOpen(privacyRaw: String?, audioEnabledRaw: String?,
         FfiConverterOptionString.lower(privacyRaw),
         FfiConverterOptionString.lower(audioEnabledRaw),
         FfiConverterOptionString.lower(listeningModeRaw),$0
+    )
+})
+}
+/**
+ * Vendor-routed capability profile — the vendor axis of the capability dial
+ * (canonical vendor tokens `"meta"` / `"android_xr"`, decided 2026-07-24).
+ * The shells feed the transport's vendor id + the live `display_capable`
+ * dial; the per-vendor floors live HERE, once, instead of a Meta floor
+ * hardcoded at every shell edge. A new vendor adds an arm (its Phase-1
+ * capability-mapping table decides the values) — shell call sites don't
+ * change.
+ */
+public func vendorCapabilityProfile(vendor: String, displayCapable: Bool) -> DeviceCapabilitySet {
+    return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_vendor_capability_profile(
+        FfiConverterString.lower(vendor),
+        FfiConverterBool.lower(displayCapable),$0
     )
 })
 }
@@ -19461,7 +21394,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_capability_label() != 7687) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_func_capability_profile_for_device() != 59790) {
+    if (uniffi_extentos_core_checksum_func_capability_profile_for_device() != 54016) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_capability_wire_id() != 40381) {
@@ -19522,6 +21455,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_device_page_label() != 14399) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_device_type_vendor() != 24465) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_device_type_wire_id() != 58358) {
@@ -19593,7 +21529,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_memory_profile_render() != 33376) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_func_meta_capability_profile() != 46161) {
+    if (uniffi_extentos_core_checksum_func_meta_capability_profile() != 62051) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_normalize_display_root() != 59593) {
@@ -19623,6 +21559,15 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_resolve_capability_tiles() != 44871) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_resolve_speak_route() != 59354) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_scale_pcm16_gain() != 57260) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_speak_playback_remainder_ms() != 25156) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_toggle_bool_default_true() != 61482) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -19633,6 +21578,42 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_transcription_gate_open() != 36844) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_vendor_capability_profile() != 33771) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_clear_display() != 64982) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_connect() != 61571) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_device() != 51088) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_disconnect() != 61561) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_on_connected() != 10199) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_on_disconnected() != 53503) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_on_packet() != 64794) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_send_audio() != 36608) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_send_lua() != 29787) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_send_message() != 19239) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_show_display() != 50394) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_abort_capture_video() != 30615) {
@@ -19654,6 +21635,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_device_model_id() != 1052) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_browsersimcore_device_vendor() != 64841) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_disconnect() != 24983) {
@@ -19950,7 +21934,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_soundregistry_remove() != 5646) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_soundregistry_resolve() != 60809) {
+    if (uniffi_extentos_core_checksum_method_soundregistry_resolve() != 30295) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_speechruntracker_reset() != 5811) {
@@ -19972,6 +21956,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_voicecore_submit_transcript() != 13081) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_constructor_brilliantcore_new() != 19892) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_constructor_browsersimcore_new() != 31454) {
@@ -20008,6 +21995,42 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_audiochunksink_on_audio_chunk() != 18768) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_blebridge_connect() != 54777) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_blebridge_write_tx() != 16164) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_blebridge_write_audio() != 39585) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_blebridge_disconnect() != 33888) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_state_changed() != 37454) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_photo() != 11410) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_audio() != 16483) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_tap() != 4474) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_click() != 6071) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_imu() != 7076) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_device_log() != 36603) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_handshake_failed() != 45038) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_clock_now_ms() != 1561) {
@@ -20123,6 +22146,8 @@ private var initializationResult: InitializationResult = {
     }
 
     uniffiCallbackInitAudioChunkSink()
+    uniffiCallbackInitBleBridge()
+    uniffiCallbackInitBrilliantObserver()
     uniffiCallbackInitClock()
     uniffiCallbackInitCompactionSink()
     uniffiCallbackInitDispatchObserver()

@@ -4,7 +4,7 @@ import Foundation
 // abstraction: OpenAI Realtime, xAI Grok, and Google Gemini Live by model
 // id, all through the Extentos MANAGED GATEWAY (no app-side key — dev
 // builds reach the gateway via the simulator's token, beta/prod builds
-// attest; BYOK is dashboard-managed, swapped in server-side) plus Mock
+// attest; there is no bring-your-own-key option) plus Mock
 // for tests. The model owns wake detection, turn taking, intent parsing,
 // and confirmation speech — the customer writes tool bodies.
 //

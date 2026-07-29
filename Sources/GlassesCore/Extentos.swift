@@ -20,7 +20,10 @@ public enum Extentos {
         )
     }
 
-    private static func resolveTransport(config: ExtentosConfig) -> (any GlassesTransport, TransportChosen, TransportSelectionSource) {
+    /// `internal` rather than `private` so TransportResolutionTests can assert
+    /// the resolved (transport, chosen, source) triple directly — the public
+    /// `ExtentosGlasses` protocol deliberately exposes none of it.
+    internal static func resolveTransport(config: ExtentosConfig) -> (any GlassesTransport, TransportChosen, TransportSelectionSource) {
         // F51 multi-project bind fix: every BrowserSim construction
         // path threads the host app's bundle identifier so the backend
         // can bind on the composite `(install_id, platform_install_id)`
@@ -32,6 +35,8 @@ public enum Extentos {
         switch config.transport {
         case .realMeta:
             return (buildRealMetaOrFallback(), .realMeta, .explicitConfig)
+        case .systemAudio:
+            return (buildSystemAudioOrFallback(), .systemAudio, .explicitConfig)
         case .simulated(.browser(let url)):
             return (
                 BrowserSimTransport(
@@ -87,7 +92,20 @@ public enum Extentos {
                 )
                 return (transport, .browserSim, .pairing)
             }
-            // Rule 5 (iOS parity fix, dogfood 2026-07): a RELEASE build targets
+            // Rule 5a: a VOICE-ONLY app — one that declared capabilities and
+            // none of them are camera or display — takes the vendorless audio
+            // baseline. iOS cannot enumerate BT bonds the way Android can, so
+            // the declared footprint is the honest signal here; it is the same
+            // derivation generateConnectionModule uses to pick a scaffold.
+            //
+            // Deliberately gated on a NON-EMPTY declaration. An app that
+            // declares nothing keeps today's behavior (Rule 5b) rather than
+            // being silently downgraded out of camera support.
+            if !config.usedCapabilities.isEmpty && !Self.declaresVendorCapability(config.usedCapabilities) {
+                return (buildSystemAudioOrFallback(), .systemAudio, .fallbackDefault)
+            }
+
+            // Rule 5b (iOS parity fix, dogfood 2026-07): a RELEASE build targets
             // real glasses. BrowserSim/LocalSim are debug-only. iOS cannot
             // enumerate BT bonds the way Android hasBondedMetaDeviceDefault does,
             // so a non-debug .auto build resolves to RealMeta and lets connect()
@@ -95,6 +113,29 @@ public enum Extentos {
             // dogfood bug where a TestFlight/Release build silently used a fake sim.)
             return (buildRealMetaOrFallback(), .realMeta, .fallbackDefault)
         }
+    }
+
+    /// Does this declared footprint need a vendor transport? Camera and display
+    /// are what a vendor adds; microphone and speaker reach the glasses through
+    /// the OS's own Bluetooth routing. Mirrors the MCP scaffold's
+    /// `requiresVendorTransport` and Android's capability derivation.
+    private static func declaresVendorCapability(_ caps: [DeclaredCapability]) -> Bool {
+        caps.contains { cap in
+            switch cap {
+            case .camera, .display: return true
+            default: return false
+            }
+        }
+    }
+
+    private static func buildSystemAudioOrFallback() -> any GlassesTransport {
+        #if os(iOS)
+        return SystemAudioTransport()
+        #else
+        // macOS host builds (unit tests) have no AVAudioSession routing —
+        // mirror buildRealMetaOrFallback's `#if os(iOS)` shape.
+        return LocalSimTransport()
+        #endif
     }
 
     /// Looks up a session URL injected at build time via the Extentos SPM
@@ -182,10 +223,10 @@ public protocol ExtentosGlasses: AnyObject, Sendable {
     var observability: any ObservabilityClient { get }
 
     /// Phase 4 — assistant runtime. The canonical voice-AI surface for
-    /// v1.4.0+. No ONNX models loaded (end-to-end via OpenAI Realtime
-    /// BYOK), so there's no cost to always exposing it. Call
-    /// `glasses.assistant.setOpenAiApiKey(key)` then
-    /// `try await glasses.assistant.start(provider: ...) { ... }`.
+    /// Since 1.4.0. No ONNX models are loaded — the realtime session runs
+    /// end-to-end through the Extentos managed gateway, so there is no cost to
+    /// always exposing it and no API key to supply. Call
+    /// `try await glasses.assistant.start(provider: .openAI()) { ... }`.
     /// See `AssistantClient`.
     var assistant: any AssistantClient { get }
 

@@ -678,6 +678,25 @@ public protocol BrilliantCoreProtocol : AnyObject {
      */
     func showDisplay(root: DisplayNode) throws  -> Rendered
     
+    /**
+     * Start streaming microphone audio from the glasses.
+     *
+     * `sample_rate_khz` is 8 or 16 — the only two the firmware accepts; any
+     * other value is coerced to 8 rather than rejected, because a wrong rate
+     * is a quality problem and a refused mic is a broken app.
+     *
+     * Chunks arrive on [`BrilliantObserver::on_audio_chunk`] as they are read,
+     * and the accumulated clip on [`BrilliantObserver::on_audio`] when
+     * [`Self::stop_microphone`] completes.
+     */
+    func startMicrophone(sampleRateKhz: UInt8) throws 
+    
+    /**
+     * Stop the microphone. The device answers with a final marker, which is
+     * what closes the accumulated clip.
+     */
+    func stopMicrophone() throws 
+    
 }
 
 /**
@@ -857,6 +876,34 @@ open func showDisplay(root: DisplayNode)throws  -> Rendered {
         FfiConverterTypeDisplayNode.lower(root),$0
     )
 })
+}
+    
+    /**
+     * Start streaming microphone audio from the glasses.
+     *
+     * `sample_rate_khz` is 8 or 16 — the only two the firmware accepts; any
+     * other value is coerced to 8 rather than rejected, because a wrong rate
+     * is a quality problem and a refused mic is a broken app.
+     *
+     * Chunks arrive on [`BrilliantObserver::on_audio_chunk`] as they are read,
+     * and the accumulated clip on [`BrilliantObserver::on_audio`] when
+     * [`Self::stop_microphone`] completes.
+     */
+open func startMicrophone(sampleRateKhz: UInt8)throws  {try rustCallWithError(FfiConverterTypeBrilliantError.lift) {
+    uniffi_extentos_core_fn_method_brilliantcore_start_microphone(self.uniffiClonePointer(),
+        FfiConverterUInt8.lower(sampleRateKhz),$0
+    )
+}
+}
+    
+    /**
+     * Stop the microphone. The device answers with a final marker, which is
+     * what closes the accumulated clip.
+     */
+open func stopMicrophone()throws  {try rustCallWithError(FfiConverterTypeBrilliantError.lift) {
+    uniffi_extentos_core_fn_method_brilliantcore_stop_microphone(self.uniffiClonePointer(),$0
+    )
+}
 }
     
 
@@ -16855,7 +16902,20 @@ public protocol BrilliantObserver : AnyObject {
     
     func onPhoto(jpeg: Data) 
     
+    /**
+     * A completed capture, delivered when the device signals the end.
+     */
     func onAudio(pcm: Data) 
+    
+    /**
+     * One chunk of microphone audio, delivered AS IT ARRIVES.
+     *
+     * Separate from [`Self::on_audio`] on purpose: a voice app needs audio
+     * while the person is still speaking, so waiting for the clip to finish
+     * would make live transcription impossible. The same bytes reach both —
+     * this one per chunk, that one accumulated at the end.
+     */
+    func onAudioChunk(pcm: Data) 
     
     func onTap() 
     
@@ -16949,6 +17009,30 @@ fileprivate struct UniffiCallbackInterfaceBrilliantObserver {
                     throw UniffiInternalError.unexpectedStaleHandle
                 }
                 return uniffiObj.onAudio(
+                     pcm: try FfiConverterData.lift(pcm)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        onAudioChunk: { (
+            uniffiHandle: UInt64,
+            pcm: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onAudioChunk(
                      pcm: try FfiConverterData.lift(pcm)
                 )
             }
@@ -21616,6 +21700,12 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_brilliantcore_show_display() != 50394) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_start_microphone() != 862) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_stop_microphone() != 64323) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_method_browsersimcore_abort_capture_video() != 30615) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -22015,22 +22105,25 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_brilliantobserver_on_photo() != 11410) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_audio() != 16483) {
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_audio() != 38516) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_tap() != 4474) {
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_audio_chunk() != 24481) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_click() != 6071) {
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_tap() != 56438) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_imu() != 7076) {
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_click() != 20206) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_device_log() != 36603) {
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_imu() != 57668) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_handshake_failed() != 45038) {
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_device_log() != 1225) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_handshake_failed() != 3805) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_clock_now_ms() != 1561) {

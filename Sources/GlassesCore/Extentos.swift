@@ -37,6 +37,8 @@ public enum Extentos {
             return (buildRealMetaOrFallback(), .realMeta, .explicitConfig)
         case .systemAudio:
             return (buildSystemAudioOrFallback(), .systemAudio, .explicitConfig)
+        case .brilliant:
+            return (buildBrilliantOrFallback(), .brilliantBle, .explicitConfig)
         case .simulated(.browser(let url)):
             return (
                 BrowserSimTransport(
@@ -78,6 +80,18 @@ public enum Extentos {
                     .browserSim,
                     .envVar
                 )
+            }
+            // Vendor arms come after the sim arms (the dev loop always wins)
+            // and before the vendorless fallbacks, mirroring where Android's
+            // VendorTransports registry sits in its Auto chain.
+            //
+            // Brilliant is checked before Meta only because its signal is
+            // strictly narrower: `hasBrilliantDevice` defaults to nil, so an
+            // app that has not opted in cannot reach this arm at all and
+            // resolution is byte-identical to before. An app that owns both
+            // and wants Meta says so explicitly.
+            if let detect = config.hasBrilliantDevice, detect() {
+                return (buildBrilliantOrFallback(), .brilliantBle, .bondedDevices)
             }
             if let detect = config.hasBondedMetaDevice, detect() {
                 return (buildRealMetaOrFallback(), .realMeta, .bondedDevices)
@@ -126,6 +140,16 @@ public enum Extentos {
             default: return false
             }
         }
+    }
+
+    /// Brilliant needs CoreBluetooth and AVFAudio, so macOS host builds (unit
+    /// tests) fall back — the same `#if os(iOS)` shape the other two use.
+    private static func buildBrilliantOrFallback() -> any GlassesTransport {
+        #if os(iOS)
+        return BrilliantTransport()
+        #else
+        return LocalSimTransport()
+        #endif
     }
 
     private static func buildSystemAudioOrFallback() -> any GlassesTransport {

@@ -46,6 +46,17 @@ public struct ExtentosConfig: Sendable {
     /// supply this closure. Defaults to nil → treated as "no bonded device."
     public var hasBondedMetaDevice: (@Sendable () -> Bool)?
 
+    /// Optional Brilliant-device detection for `.auto` transport resolution.
+    /// The same shape as ``hasBondedMetaDevice`` and for the same reason: iOS
+    /// exposes no bonded-device list an app may read, so unlike Android — where
+    /// the vendor module checks bonds itself — the signal comes from the app.
+    /// Pass `ExtentosBrilliant.hasConnectedDevice`, or your own check.
+    ///
+    /// Defaults to nil → treated as "no Brilliant device", so `.auto` behaves
+    /// exactly as it did before this transport existed. Selecting
+    /// ``TransportChoice/brilliant`` explicitly needs none of this.
+    public var hasBrilliantDevice: (@Sendable () -> Bool)?
+
     /// The app's declared capability footprint — drives the connection
     /// page's capability tiles ("the app decides which tiles exist; the
     /// device decides which are lit"). Emitted by generateConnectionModule
@@ -67,6 +78,7 @@ public struct ExtentosConfig: Sendable {
         telemetryEndpoint: URL? = nil,
         premiumVoice: PremiumVoiceConfig = .none,
         hasBondedMetaDevice: (@Sendable () -> Bool)? = nil,
+        hasBrilliantDevice: (@Sendable () -> Bool)? = nil,
         usedCapabilities: [DeclaredCapability] = []
     ) {
         self.usedCapabilities = usedCapabilities
@@ -84,6 +96,7 @@ public struct ExtentosConfig: Sendable {
         self.telemetryEndpoint = telemetryEndpoint
         self.premiumVoice = premiumVoice
         self.hasBondedMetaDevice = hasBondedMetaDevice
+        self.hasBrilliantDevice = hasBrilliantDevice
     }
 }
 
@@ -101,6 +114,16 @@ public enum TransportChoice: Sendable {
     /// a voice-only app, or let ``auto`` resolve to it when the app declares no
     /// camera/display capabilities. See `SystemAudioTransport`.
     case systemAudio
+
+    /// Brilliant Labs glasses (Halo, Frame) over their own BLE link.
+    ///
+    /// Not a Bluetooth headset: Halo streams its microphone over a custom GATT
+    /// service and never becomes the phone's audio device, which is why it
+    /// needs a transport rather than falling out of ``systemAudio``. Requires
+    /// `NSBluetoothAlwaysUsageDescription` in your Info.plist.
+    ///
+    /// PREVIEW — see `ExtentosBrilliant`.
+    case brilliant
 
     case simulated(Simulated)
 

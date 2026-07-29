@@ -63,11 +63,11 @@ public extension TransportChosen {
         // first (Principle #5); the case is mirrored here so the shared
         // vocabulary stays exhaustive on both shells and parity CI stays green.
         case .systemAudio: return "SystemAudio"
-        // Brilliant Labs BLE transport (vendor brilliant). Android ships the
-        // transport first (Principle #4); the case is mirrored here so the
-        // shared vocabulary stays exhaustive on both shells. An iOS BleBridge
-        // over CoreBluetooth is the remaining piece — all the protocol already
-        // lives in the shared core, so it is the socket and nothing else.
+        // Brilliant Labs BLE transport (vendor brilliant). Android shipped
+        // first (Principle #4); the iOS half followed, and it was exactly what
+        // this comment predicted — the CoreBluetooth socket and nothing else,
+        // because all the protocol lives in the shared core. See
+        // Transport/Brilliant/.
         case .brilliantBle: return "BrilliantBle"
         }
     }

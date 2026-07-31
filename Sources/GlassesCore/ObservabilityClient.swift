@@ -47,19 +47,42 @@ public protocol ObservabilityClient: Sendable {
     ///     after the end frame is emitted (so the simulator records
     ///     the failure before propagation).
     /// - Returns: Whatever `block` returns.
+    ///   - failureReason: Tells the wrapper what a FAILED result looks like.
+    ///     Return `nil` for success, or a short variant name for failure — it
+    ///     is reported verbatim as `error_class`, so `"keyRejected"` reads
+    ///     better than `"failed"`.
+    ///
+    ///     Needed because this SDK's convention is that failures are RETURN
+    ///     VALUES, not thrown errors. Without it the wrapper can only ask "did
+    ///     the block throw", so a call that came back `.keyRejected` after an
+    ///     HTTP 401 was logged `success: true` — every BYOK failure variant
+    ///     logged green, forever, in the one facility offered for observing
+    ///     BYOK calls (found by a fresh agent, 2026-07-31). Omit it and you
+    ///     get the old throws-only behaviour.
     func aiCall<T: Sendable>(
         label: String,
         metadata: [String: String],
+        failureReason: (@Sendable (T) -> String?)?,
         block: @Sendable () async throws -> T
     ) async rethrows -> T
 }
 
 public extension ObservabilityClient {
+    /// Convenience overload — no result classifier, so only thrown errors
+    /// count as failures. Kept so existing call sites compile unchanged.
+    func aiCall<T: Sendable>(
+        label: String,
+        metadata: [String: String],
+        block: @Sendable () async throws -> T
+    ) async rethrows -> T {
+        try await aiCall(label: label, metadata: metadata, failureReason: nil, block: block)
+    }
+
     /// Convenience overload — `metadata` defaults to empty.
     func aiCall<T: Sendable>(
         label: String,
         block: @Sendable () async throws -> T
     ) async rethrows -> T {
-        try await aiCall(label: label, metadata: [:], block: block)
+        try await aiCall(label: label, metadata: [:], failureReason: nil, block: block)
     }
 }

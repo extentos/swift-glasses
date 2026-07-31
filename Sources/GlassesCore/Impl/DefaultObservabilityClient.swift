@@ -23,6 +23,7 @@ final class DefaultObservabilityClient: ObservabilityClient, @unchecked Sendable
     func aiCall<T: Sendable>(
         label: String,
         metadata: [String: String],
+        failureReason: (@Sendable (T) -> String?)?,
         block: @Sendable () async throws -> T
     ) async rethrows -> T {
         // Start/end frames pair around `block`. Since Phase 2a Stage 3,
@@ -36,15 +37,28 @@ final class DefaultObservabilityClient: ObservabilityClient, @unchecked Sendable
         let startNs = DispatchTime.now().uptimeNanoseconds
         do {
             let result = try await block()
+            // Two ways to fail, and only one of them throws. Keying success on
+            // "did not throw" reported every typed failure as a success.
+            let returnedFailure = failureReason?(result)
             if let sim = sim {
                 let durationMs = Int64((DispatchTime.now().uptimeNanoseconds - startNs) / 1_000_000)
-                sim.sendOutbound(endFrame(label: label, durationMs: durationMs, error: nil))
+                sim.sendOutbound(endFrame(
+                    label: label,
+                    durationMs: durationMs,
+                    error: nil,
+                    returnedFailure: returnedFailure
+                ))
             }
             return result
         } catch {
             if let sim = sim {
                 let durationMs = Int64((DispatchTime.now().uptimeNanoseconds - startNs) / 1_000_000)
-                sim.sendOutbound(endFrame(label: label, durationMs: durationMs, error: error))
+                sim.sendOutbound(endFrame(
+                    label: label,
+                    durationMs: durationMs,
+                    error: error,
+                    returnedFailure: nil
+                ))
             }
             throw error
         }
@@ -64,13 +78,23 @@ final class DefaultObservabilityClient: ObservabilityClient, @unchecked Sendable
         return frame
     }
 
-    private func endFrame(label: String, durationMs: Int64, error: Error?) -> [String: Any] {
+    private func endFrame(
+        label: String,
+        durationMs: Int64,
+        error: Error?,
+        returnedFailure: String?
+    ) -> [String: Any] {
         var frame: [String: Any] = [
             "type": "ai_call_end",
             "label": label,
             "duration_ms": durationMs,
-            "success": error == nil,
+            "success": error == nil && returnedFailure == nil,
         ]
+        if let returnedFailure = returnedFailure, error == nil {
+            // The caller's own variant name, so the log reads "keyRejected"
+            // rather than a generic marker.
+            frame["error_class"] = String(returnedFailure.prefix(64))
+        }
         if let error = error {
             // Surface the error class + first-line message so the
             // event log entry is self-describing. Avoid emitting the

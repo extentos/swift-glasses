@@ -66,6 +66,41 @@ public struct CameraStreamPaused: Error, Sendable {
     }
 }
 
+/// Thrown by the `CameraClient.videoFrames` stream when the connected transport has
+/// no camera path at all, so no frame will ever arrive. `error` is the same typed
+/// `CaptureError` that `capturePhoto` / `captureVideo` return for this transport —
+/// all three camera entry points report one reason.
+///
+/// Before this existed the stream simply finished, instantly and silently, which
+/// every reasonable consumer reads as "the glasses disconnected" rather than "this
+/// transport has no camera". The transport layer's `AsyncStream` has no error
+/// channel, so finishing was the only thing it could do; `DefaultCameraClient`
+/// surfaces the reason on the customer-facing `AsyncThrowingStream` instead.
+///
+/// ```swift
+/// do {
+///     for try await frame in glasses.camera.videoFrames() { render(frame) }
+/// } catch let e as CameraUnavailable {
+///     log("no camera on this transport: \(e.message)")
+/// }
+/// ```
+///
+/// To branch BEFORE starting a stream, read `glasses.capabilities.camera`.
+///
+/// Mirrors Kotlin `CameraUnavailableException`. NOTE the deliberate message
+/// divergence: on Android the common cause is a build omitting
+/// `com.extentos:glasses-meta`, because `com.extentos:glasses` is vendorless.
+/// iOS has no such split — `RealMetaTransport` ships inside `GlassesCore` — so
+/// the iOS message describes the real iOS cause (no vendor transport claimed the
+/// session) rather than a dependency that doesn't exist on this platform.
+public struct CameraUnavailable: Error, Sendable {
+    public let error: CaptureError
+    public var message: String { captureErrorMessage(error: error) }
+    public init(error: CaptureError) {
+        self.error = error
+    }
+}
+
 public struct PhotoConfig: Sendable {
     public var resolution: Resolution
     public var format: PhotoFormat

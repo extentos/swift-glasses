@@ -105,6 +105,26 @@ public protocol GlassesTransport: Sendable {
     /// `GlassesTransport.activeStreamInfo()`.
     func activeStreamInfo() -> ActiveStreamInfo?
 
+    /// Why this transport cannot serve camera at all, or `nil` when it can.
+    ///
+    /// NOT the capability profile: `vendorCapabilityProfile` answers "does this
+    /// vendor's hardware have a camera" — Brilliant reports `camera = true`
+    /// because both devices have one, while the transport still refuses capture
+    /// because the on-device bundle doesn't implement it. This answers the
+    /// narrower question a caller needs: will frames ever arrive.
+    ///
+    /// Exists because the transport-level `videoFrames` is an `AsyncStream`,
+    /// which has no error channel — a transport with no camera path can only
+    /// finish the stream, which is indistinguishable from a disconnect.
+    /// `DefaultCameraClient` turns a non-nil answer into `CameraUnavailable` on
+    /// the customer-facing `AsyncThrowingStream`, so the stream reports the SAME
+    /// typed reason `capturePhoto` / `captureVideo` already return.
+    ///
+    /// Return the transport's own existing refusal error rather than a new
+    /// string. Default `nil`: transports with a camera path. Mirrors Kotlin
+    /// `GlassesTransport.videoStreamUnavailable()`.
+    func videoStreamUnavailable() -> CaptureError?
+
     func shutdown() async
 
     /// Optional URL-callback forwarder. Transports that don't participate in
@@ -120,6 +140,12 @@ public extension GlassesTransport {
     /// first-armer lock; `BrowserSimTransport` reports its own stream registry;
     /// `LocalSim` inherits this.
     func activeStreamInfo() -> ActiveStreamInfo? { nil }
+
+    /// Default: this transport has a camera path. Only the transports that
+    /// genuinely cannot serve frames override — `SystemAudioTransport` (no
+    /// vendor claimed the session) and `BrilliantTransport` (capture not
+    /// implemented in the on-device bundle yet).
+    func videoStreamUnavailable() -> CaptureError? { nil }
 
     /// Default: not paused. `RealMetaTransport` and `BrowserSimTransport` both
     /// report the real state from the shared Rust core; `LocalSim` inherits this.

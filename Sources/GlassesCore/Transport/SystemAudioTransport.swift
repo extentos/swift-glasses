@@ -94,10 +94,17 @@ public final class SystemAudioTransport: GlassesTransport, @unchecked Sendable {
     }
 
     public nonisolated func videoFrames(config: VideoFrameConfig) -> AsyncStream<VideoFrame> {
-        // No frames will ever arrive — finish immediately rather than holding a
-        // dead-open stream. The typed refusal lives on the discrete captures; an
-        // AsyncStream has no error channel by contract.
+        // Unreachable in practice: DefaultCameraClient's no-camera gate reads
+        // `videoStreamUnavailable()` and throws CameraUnavailable on the customer-facing
+        // AsyncThrowingStream before this is ever iterated. Kept as the safe floor
+        // for a caller holding the transport directly.
         AsyncStream { $0.finish() }
+    }
+
+    /// The stream's half of the refusal — the same error the discrete paths
+    /// return, so all three camera entry points agree.
+    public nonisolated func videoStreamUnavailable() -> CaptureError? {
+        Self.noCameraRefusal(op: "video_frames")
     }
 
     private static func noCameraRefusal(op: String) -> CaptureError {

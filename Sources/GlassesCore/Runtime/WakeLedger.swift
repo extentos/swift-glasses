@@ -37,9 +37,42 @@ final class WakeLedger: @unchecked Sendable {
         try? handle.write(contentsOf: Data(line.utf8))
     }
 
+    /// True when this process is an XCTest runner.
+    ///
+    /// Computed once: `NSClassFromString` is cheap but this sits on the wake
+    /// path, and the answer cannot change within a process. XCTest is not linked
+    /// into a shipping app, so on a real device this is always false and the
+    /// ledger behaves exactly as before — the check costs a nil comparison.
+    private static let isUnderXCTest = NSClassFromString("XCTestCase") != nil
+
     private func openIfNeeded() {
         guard !opened else { return }
         opened = true
+        // Never touch the filesystem under XCTest.
+        //
+        // This header promises "never blocks", and until 2026-07-30 that was
+        // untrue in one environment: the self-hosted CI runner overrides HOME and
+        // runs in its own security session, so `documentDirectory` resolves
+        // somewhere that STALLS rather than failing. The stall happens while
+        // `note()` holds `lock`, and `note()` is called from `doWakeLocked()`
+        // inside the assistant's LifecycleSerializer — so one stuck stat wedged
+        // every subsequent lifecycle operation, the test's expectation never
+        // fulfilled, and the iOS gate burned its 75-minute budget with no output.
+        // Four consecutive runs ended `cancelled` and it read as CI flakiness.
+        //
+        // A measurement facility must never be able to wedge the thing it
+        // measures, and this one hid it perfectly: every write is `try?`, so the
+        // failure had no voice. Disabling it under test restores the gate at zero
+        // risk to device behaviour — a test run has no multi-launch wake history
+        // to preserve, which is the ledger's whole reason to exist.
+        //
+        // NOTE this is the containment, not the cure. On a real device the same
+        // shape is still reachable: a slow or unwritable documents directory
+        // would stall the wake path and present as "the assistant never wakes",
+        // silently. Fixing that means moving the I/O off the lock, which is a
+        // change to a hardware-verified path and is scheduled deliberately with a
+        // glasses re-verification rather than smuggled in here.
+        guard !Self.isUnderXCTest else { return }
         guard
             let url = FileManager.default
                 .urls(for: .documentDirectory, in: .userDomainMask)

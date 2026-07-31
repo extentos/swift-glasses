@@ -616,6 +616,29 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 public protocol BrilliantCoreProtocol : AnyObject {
     
     /**
+     * Take one still.
+     *
+     * The reply arrives on [`BrilliantObserver::on_photo`] as a complete JPEG —
+     * the chunk reassembly, its dedicated buffer and the reconnect reset were
+     * already built; only this request was missing, which is why `capturePhoto`
+     * used to refuse.
+     *
+     * **Fire-and-forget by design, like the microphone.** The core carries no
+     * clock (see [`BrilliantLink`]), so the caller owns the timeout. Expect
+     * hundreds of milliseconds to seconds: a still crosses BLE one MTU-sized
+     * chunk at a time, and that is a real latency difference from Meta rather
+     * than a bug to tune out.
+     *
+     * PREVIEW: no Brilliant device has run this. The receive half is verified
+     * against the vendor's own implementation; the on-device capture is written
+     * against the vendor's documented `frame.camera` API and nothing more.
+     * Takes the vendor-NEUTRAL [`Resolution`] rather than Brilliant's own
+     * resolution/quality pair, so the mapping onto `frame.camera.capture`'s
+     * ladder lives here once instead of in each shell.
+     */
+    func capturePhoto(resolution: Resolution) throws 
+    
+    /**
      * Blank the panel.
      */
     func clearDisplay() throws 
@@ -760,6 +783,34 @@ public convenience init(bridge: BleBridge, observer: BrilliantObserver) {
 
     
 
+    
+    /**
+     * Take one still.
+     *
+     * The reply arrives on [`BrilliantObserver::on_photo`] as a complete JPEG —
+     * the chunk reassembly, its dedicated buffer and the reconnect reset were
+     * already built; only this request was missing, which is why `capturePhoto`
+     * used to refuse.
+     *
+     * **Fire-and-forget by design, like the microphone.** The core carries no
+     * clock (see [`BrilliantLink`]), so the caller owns the timeout. Expect
+     * hundreds of milliseconds to seconds: a still crosses BLE one MTU-sized
+     * chunk at a time, and that is a real latency difference from Meta rather
+     * than a bug to tune out.
+     *
+     * PREVIEW: no Brilliant device has run this. The receive half is verified
+     * against the vendor's own implementation; the on-device capture is written
+     * against the vendor's documented `frame.camera` API and nothing more.
+     * Takes the vendor-NEUTRAL [`Resolution`] rather than Brilliant's own
+     * resolution/quality pair, so the mapping onto `frame.camera.capture`'s
+     * ladder lives here once instead of in each shell.
+     */
+open func capturePhoto(resolution: Resolution)throws  {try rustCallWithError(FfiConverterTypeBrilliantError.lift) {
+    uniffi_extentos_core_fn_method_brilliantcore_capture_photo(self.uniffiClonePointer(),
+        FfiConverterTypeResolution.lower(resolution),$0
+    )
+}
+}
     
     /**
      * Blank the panel.
@@ -6568,6 +6619,160 @@ public func FfiConverterTypeLocalRung_lift(_ buf: RustBuffer) throws -> LocalRun
 #endif
 public func FfiConverterTypeLocalRung_lower(_ value: LocalRung) -> RustBuffer {
     return FfiConverterTypeLocalRung.lower(value)
+}
+
+
+/**
+ * One position in a top-level box walk. Carried across the FFI in both
+ * directions so the walk stays a pure function of (state, bytes).
+ */
+public struct Mp4Walk {
+    /**
+     * Byte offset the shell must read the next header from.
+     */
+    public var offset: UInt64
+    /**
+     * How many bytes the shell should hand back for that read.
+     */
+    public var want: UInt32
+    /**
+     * Walk finished — `ok` and `reason` are finalized.
+     */
+    public var done: Bool
+    /**
+     * A player can open this file.
+     */
+    public var ok: Bool
+    /**
+     * Empty while walking; on failure, why — phrased for a developer log.
+     */
+    public var reason: String
+    public var seenFtyp: Bool
+    public var seenMoov: Bool
+    /**
+     * Boxes traversed, for diagnostics.
+     */
+    public var boxes: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Byte offset the shell must read the next header from.
+         */offset: UInt64, 
+        /**
+         * How many bytes the shell should hand back for that read.
+         */want: UInt32, 
+        /**
+         * Walk finished — `ok` and `reason` are finalized.
+         */done: Bool, 
+        /**
+         * A player can open this file.
+         */ok: Bool, 
+        /**
+         * Empty while walking; on failure, why — phrased for a developer log.
+         */reason: String, seenFtyp: Bool, seenMoov: Bool, 
+        /**
+         * Boxes traversed, for diagnostics.
+         */boxes: UInt32) {
+        self.offset = offset
+        self.want = want
+        self.done = done
+        self.ok = ok
+        self.reason = reason
+        self.seenFtyp = seenFtyp
+        self.seenMoov = seenMoov
+        self.boxes = boxes
+    }
+}
+
+
+
+extension Mp4Walk: Equatable, Hashable {
+    public static func ==(lhs: Mp4Walk, rhs: Mp4Walk) -> Bool {
+        if lhs.offset != rhs.offset {
+            return false
+        }
+        if lhs.want != rhs.want {
+            return false
+        }
+        if lhs.done != rhs.done {
+            return false
+        }
+        if lhs.ok != rhs.ok {
+            return false
+        }
+        if lhs.reason != rhs.reason {
+            return false
+        }
+        if lhs.seenFtyp != rhs.seenFtyp {
+            return false
+        }
+        if lhs.seenMoov != rhs.seenMoov {
+            return false
+        }
+        if lhs.boxes != rhs.boxes {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(offset)
+        hasher.combine(want)
+        hasher.combine(done)
+        hasher.combine(ok)
+        hasher.combine(reason)
+        hasher.combine(seenFtyp)
+        hasher.combine(seenMoov)
+        hasher.combine(boxes)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMp4Walk: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Mp4Walk {
+        return
+            try Mp4Walk(
+                offset: FfiConverterUInt64.read(from: &buf), 
+                want: FfiConverterUInt32.read(from: &buf), 
+                done: FfiConverterBool.read(from: &buf), 
+                ok: FfiConverterBool.read(from: &buf), 
+                reason: FfiConverterString.read(from: &buf), 
+                seenFtyp: FfiConverterBool.read(from: &buf), 
+                seenMoov: FfiConverterBool.read(from: &buf), 
+                boxes: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Mp4Walk, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.offset, into: &buf)
+        FfiConverterUInt32.write(value.want, into: &buf)
+        FfiConverterBool.write(value.done, into: &buf)
+        FfiConverterBool.write(value.ok, into: &buf)
+        FfiConverterString.write(value.reason, into: &buf)
+        FfiConverterBool.write(value.seenFtyp, into: &buf)
+        FfiConverterBool.write(value.seenMoov, into: &buf)
+        FfiConverterUInt32.write(value.boxes, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMp4Walk_lift(_ buf: RustBuffer) throws -> Mp4Walk {
+    return try FfiConverterTypeMp4Walk.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMp4Walk_lower(_ value: Mp4Walk) -> RustBuffer {
+    return FfiConverterTypeMp4Walk.lower(value)
 }
 
 
@@ -19940,6 +20145,30 @@ fileprivate struct FfiConverterOptionTypeBrilliantDevice: FfiConverterRustBuffer
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeCaptureError: FfiConverterRustBuffer {
+    typealias SwiftType = CaptureError?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeCaptureError.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeCaptureError.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeConnectError: FfiConverterRustBuffer {
     typealias SwiftType = ConnectError?
 
@@ -21167,6 +21396,32 @@ public func metaCapabilityProfile(displayCapable: Bool) -> DeviceCapabilitySet {
 })
 }
 /**
+ * Start a walk at the beginning of the file.
+ */
+public func mp4WalkInit() -> Mp4Walk {
+    return try!  FfiConverterTypeMp4Walk.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_mp4_walk_init($0
+    )
+})
+}
+/**
+ * Consume one box header and return the next position.
+ *
+ * `header` is up to `state.want` bytes read at `state.offset` — short is fine
+ * and meaningful (it means EOF). `file_len` is the total file size.
+ *
+ * The shell loops until `done`, then reads `ok`/`reason`.
+ */
+public func mp4WalkStep(state: Mp4Walk, header: Data, fileLen: UInt64) -> Mp4Walk {
+    return try!  FfiConverterTypeMp4Walk.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_mp4_walk_step(
+        FfiConverterTypeMp4Walk.lower(state),
+        FfiConverterData.lower(header),
+        FfiConverterUInt64.lower(fileLen),$0
+    )
+})
+}
+/**
  * Normalize `show{}`'s top-level nodes into the single root the transport
  * renders. See the module docs for the rules.
  */
@@ -21417,6 +21672,46 @@ public func vendorCapabilityProfile(vendor: String, displayCapable: Bool) -> Dev
     )
 })
 }
+/**
+ * Why a vendor's transport cannot take a STILL, or `None` when it can.
+ *
+ * Separate from [`vendor_video_stream_refusal`] because Brilliant is exactly the
+ * vendor where the two answers differ: stills work, streaming cannot. Collapsing
+ * them into one "camera" answer is what made the simulator wrong.
+ */
+public func vendorPhotoRefusal(vendor: String) -> CaptureError? {
+    return try!  FfiConverterOptionTypeCaptureError.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_vendor_photo_refusal(
+        FfiConverterString.lower(vendor),$0
+    )
+})
+}
+/**
+ * Why a vendor's transport cannot serve a live FRAME STREAM, or `None` when it
+ * can. The message is the customer-facing reason.
+ *
+ * This is TRANSPORT truth, deliberately distinct from
+ * [`vendor_capability_profile`]'s HARDWARE truth. Android XR reports
+ * `camera = true` there because gen-1 devices genuinely have a camera, and
+ * Brilliant reports one because both its devices do — yet neither can stream
+ * frames. The capability dial answers "does the hardware have it"; this answers
+ * "will frames actually arrive".
+ *
+ * **Exists so the SIMULATOR and the vendor transports cannot disagree.** The
+ * simulator serves camera from this core, so without a shared source it happily
+ * streamed frames for a selected Brilliant device while the real Brilliant
+ * transport refused them — the simulator contradicting our own vendor docs, and
+ * the one direction of sim/hardware divergence that manufactures confidence
+ * instead of destroying it. One function, both callers; when a vendor's
+ * streaming lands, one edit flips the sim and the transport together.
+ */
+public func vendorVideoStreamRefusal(vendor: String) -> CaptureError? {
+    return try!  FfiConverterOptionTypeCaptureError.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_vendor_video_stream_refusal(
+        FfiConverterString.lower(vendor),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -21616,6 +21911,12 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_meta_capability_profile() != 62051) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_mp4_walk_init() != 11149) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_mp4_walk_step() != 13992) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_normalize_display_root() != 59593) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -21665,6 +21966,15 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_vendor_capability_profile() != 33771) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_vendor_photo_refusal() != 3) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_vendor_video_stream_refusal() != 43181) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantcore_capture_photo() != 17441) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_brilliantcore_clear_display() != 64982) {

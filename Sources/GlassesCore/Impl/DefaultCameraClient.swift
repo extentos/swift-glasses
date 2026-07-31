@@ -64,6 +64,21 @@ final class DefaultCameraClient: CameraClient, @unchecked Sendable {
     }
 
     func videoFrames(config: VideoFrameConfig) -> AsyncThrowingStream<VideoFrame, Error> {
+        // THE no-camera gate. The transport-level stream is an AsyncStream with no
+        // error channel, so a transport with no camera path can only finish —
+        // indistinguishable from a disconnect to every consumer. Surface the
+        // transport's OWN typed refusal here so this stream reports exactly what
+        // capturePhoto and captureVideo already report. Checked before the paused
+        // gate: a transport with no camera cannot have a paused one.
+        // Mirrors Kotlin DefaultCameraClient's videoStreamUnavailable gate.
+        if let reason = transport.videoStreamUnavailable() {
+            transport.notifyCaptureDenied(
+                op: "video_frames",
+                reason: "camera_unavailable",
+                message: captureErrorMessage(error: reason)
+            )
+            return AsyncThrowingStream { $0.finish(throwing: CameraUnavailable(error: reason)) }
+        }
         // Same single paused gate. Starting live frames while paused throws
         // CameraStreamPaused so the collector can prompt a resume. A pause MID-stream
         // is not an error — the transport's frames simply stop and resume when the

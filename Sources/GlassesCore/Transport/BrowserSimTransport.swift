@@ -171,7 +171,10 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
             config: BrowserSimConfig(
                 clientMetadata: ClientMetadata(
                     sdk: "extentos-glasses-core",
-                    sdkVersion: "0.1.0-phase3",
+                    // Was the hardcoded literal "0.1.0-phase3", so every simulator
+                    // session has been told the wrong SDK version since Phase 3.
+                    // Kotlin had the identical bug and the identical fix.
+                    sdkVersion: LibraryVersion.version,
                     platform: "ios"
                 ),
                 initialSessionUrl: initialSessionUrl,

@@ -2,6 +2,9 @@ import Foundation
 #if canImport(AVFAudio)
 import AVFAudio
 #endif
+#if canImport(ImageIO)
+import ImageIO
+#endif
 
 // The Brilliant Labs transport — the iOS half of the vendor Android shipped
 // first (Principle #4).
@@ -30,6 +33,12 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
     /// running. `.connected` is NOT enough: the device understands nothing
     /// until then.
     private let gate = ReadyGate()
+
+    /// Resolved by the observer with the next reassembled JPEG. Same
+    /// arrive-before-wait handling as `ReadyGate`: on a fast link the photo can
+    /// land before the await begins, and without that the caller would hang
+    /// until the timeout on a capture that already succeeded.
+    private let photoGate = PhotoGate()
 
     private let lock = NSLock()
     private var onSelect: (@Sendable (String) -> Void)?
@@ -93,8 +102,9 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
         }
 
         func onPhoto(jpeg: Data) {
-            // Nothing requests a photo yet; a device that sends one anyway is
-            // not an error, just unexpected.
+            // Hand it to whoever asked. A photo with no waiter is not an error —
+            // the wearer can press the button — it just has nowhere to go.
+            transport?.photoGate.resolve(jpeg)
         }
 
         func onAudio(pcm: Data) {
@@ -230,25 +240,175 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
 
     // ── Capture — refused, with the reason ───────────────────────────────────
 
+    /// Take one still.
+    ///
+    /// Fire the request, then wait for the reassembled JPEG on the observer. The
+    /// core carries no clock, so the timeout is ours, and it is generous on
+    /// purpose: a still crosses BLE one MTU-sized chunk at a time, which runs to
+    /// hundreds of milliseconds or seconds. That is a real latency difference
+    /// from Meta rather than a fault to tune out.
+    ///
+    /// `config.format` is ignored because the camera emits JPEG and nothing else,
+    /// and `config.dedicatedCapture` has no meaning here — there is no live
+    /// stream to grab a frame from, so every still is dedicated. The returned
+    /// `Photo` reports the dimensions that ARRIVED, which matters because Halo
+    /// pins its own resolution and treats the request as advisory.
+    ///
+    /// PREVIEW: no Brilliant device has run this.
     public func capturePhoto(config: PhotoConfig) async -> ExtentosResult<Photo, CaptureError> {
-        .failure(.platformError(code: "brilliant_camera_not_wired", message: Self.notWiredCamera))
+        photoGate.arm()
+        do {
+            try core.capturePhoto(resolution: config.resolution)
+        } catch {
+            return .failure(.platformError(
+                code: "brilliant_capture_request_failed",
+                message: "The capture request could not be sent: \(error.localizedDescription)"
+            ))
+        }
+
+        guard let jpeg = await photoGate.wait(timeoutMs: Self.photoTimeoutMs), !jpeg.isEmpty else {
+            return .failure(.platformError(
+                code: "brilliant_photo_timeout",
+                message: "The glasses did not return a still within "
+                    + "\(Self.photoTimeoutMs / 1000)s. A photo crosses BLE one chunk at a "
+                    + "time, so a weak link or a high quality setting can exceed this; "
+                    + "retry, or request a lower Resolution."
+            ))
+        }
+
+        // Photo carries a uri, not bytes, so the JPEG has to land somewhere.
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let url = dir.appendingPathComponent("brilliant-\(UUID().uuidString).jpg")
+        do {
+            try jpeg.write(to: url)
+        } catch {
+            return .failure(.platformError(
+                code: "brilliant_photo_write_failed",
+                message: "The still arrived (\(jpeg.count) bytes) but could not be written: "
+                    + "\(error.localizedDescription)"
+            ))
+        }
+
+        // Read the dimensions from the JPEG header rather than decoding it — the
+        // bytes are already the deliverable, and a full decode would cost memory
+        // for nothing. Reports what ARRIVED, which matters because Halo pins its
+        // own resolution and treats the requested one as advisory.
+        let (width, height) = Self.jpegPixelSize(jpeg)
+        return .success(Photo(
+            uri: url.absoluteString,
+            width: width,
+            height: height,
+            format: .jpeg,
+            exif: nil
+        ))
+    }
+
+    private static func jpegPixelSize(_ data: Data) -> (Int32, Int32) {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int,
+              let h = props[kCGImagePropertyPixelHeight] as? Int
+        else {
+            // A still we cannot measure is still a still — the uri is the
+            // deliverable. Zeroes say "unknown" rather than inventing a size.
+            return (0, 0)
+        }
+        return (Int32(w), Int32(h))
     }
 
     public func captureVideo(config: VideoConfig) async -> ExtentosResult<VideoClip, CaptureError> {
-        .failure(.platformError(code: "brilliant_no_video", message: Self.noVideo))
+        .failure(videoStreamUnavailable()!)
     }
 
+    /// One bounded utterance.
+    ///
+    /// Built ON TOP of `transcriptions(config:)` rather than beside it, which is
+    /// what keeps it small: that path already builds the recogniser over the BLE
+    /// audio input, and tears it down on termination. Duplicating any of it would
+    /// be a second place for the audio lifecycle to drift. Mirrors Android.
+    ///
+    /// **The recogniser's own endpointing is the silence detection.** A
+    /// `Transcript.final` IS the recogniser saying the utterance ended, so
+    /// `silenceTimeoutSeconds` selects silence-bounded behaviour rather than
+    /// setting an exact threshold — the same division of labour the Meta path
+    /// uses, where silence bounding belongs to the platform bridge.
+    ///
+    /// `maxDurationSeconds` is a hard cap enforced here; with both bounds unset
+    /// the capture runs to `recordHardCapMs`, which exists only so a forgotten
+    /// recording cannot hold the glasses' radio for the rest of the session. A
+    /// cap that fires mid-utterance still returns the best transcript so far —
+    /// a partial answer beats an error the caller cannot act on.
+    ///
+    /// PREVIEW: no Brilliant device has run this.
     public func recordAudio(config: AudioRecordConfig) async -> ExtentosResult<AudioRecording, AudioError> {
-        .failure(.platformError(code: "brilliant_mic_not_wired", message: Self.notWiredRecord))
+        let startedAt = Date()
+        let capMs = config.maxDurationSeconds.map { Int($0) * 1000 } ?? Self.recordHardCapMs
+
+        let stream = transcriptions(config: TranscriptionConfig())
+
+        // Race the recogniser against the cap. Cancelling the collector ends the
+        // `for await`, which terminates the stream, which is what stops the
+        // recogniser and releases the microphone — so the cap tears everything
+        // down through the same path a normal endpoint does.
+        let collector = Task { () -> (String, Bool) in
+            var text = ""
+            var saw = false
+            for await t in stream {
+                saw = true
+                switch t {
+                case .partial(let partial, _):
+                    if !partial.isEmpty { text = partial }
+                case .final(let final, _, _, _):
+                    if !final.isEmpty { text = final }
+                    return (text, saw)
+                }
+            }
+            // Reached on cancellation (the cap) or a stream that ended without a
+            // final — either way, return what was accumulated rather than losing it.
+            return (text, saw)
+        }
+        let deadline = Task {
+            try? await Task.sleep(nanoseconds: UInt64(capMs) * 1_000_000)
+            collector.cancel()
+        }
+        let (best, sawAnything) = await collector.value
+        deadline.cancel()
+
+        let durationMs = Int64(Date().timeIntervalSince(startedAt) * 1000)
+        if best.isEmpty && !sawAnything {
+            return .failure(.platformError(
+                code: "brilliant_record_no_recognizer",
+                message: "recordDiscrete produced nothing: no speech recogniser could be "
+                    + "reached for glasses audio. Collect audio.audioChunks() and run your own "
+                    + "recogniser if this device cannot serve one."
+            ))
+        }
+        return .success(AudioRecording(
+            transcript: best,
+            audioDurationMs: durationMs,
+            // No raw-audio file: the mic fan-out hands out PCM live and this path
+            // keeps nothing, so inventing a uri would promise a file that does
+            // not exist. Collect audioChunks() if you need the bytes.
+            rawAudioUri: nil
+        ))
     }
 
     public nonisolated func videoFrames(config: VideoFrameConfig) -> AsyncStream<VideoFrame> {
-        // An AsyncStream has no error channel by contract, so an unimplemented
-        // stream can only complete — and one that completes in SILENCE is the
-        // worst outcome: the app waits forever on something that already gave
-        // up. This says so on the way out.
+        // Unreachable in practice: DefaultCameraClient's no-camera gate reads
+        // `videoStreamUnavailable()` and throws CameraUnavailable before this is
+        // iterated. The log stays for a caller holding the transport directly.
         bridgeLog("videoFrames: \(Self.noVideo)")
         return AsyncStream { $0.finish() }
+    }
+
+    /// The reason the stream can't serve frames. This file already identified the
+    /// problem — "one that completes in SILENCE is the worst outcome: the app
+    /// waits forever on something that already gave up" — and could only log it,
+    /// because the transport-level AsyncStream has no error channel. Now the
+    /// reason reaches the caller instead of the console.
+    public nonisolated func videoStreamUnavailable() -> CaptureError? {
+        .platformError(code: "brilliant_no_video", message: Self.noVideo)
     }
 
     // ── Microphone ───────────────────────────────────────────────────────────
@@ -393,15 +553,15 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
         + "the text on the phone side yet, and Frame has no speaker at all. Use the display, "
         + "or drive your own TTS into audio output."
 
-    private static let notWiredRecord =
-        "recordAudio() is not wired on Brilliant yet. Live microphone audio DOES work — use "
-        + "audioChunks() or transcriptions(), which is what an audio-first app wants anyway; "
-        + "what is missing is the discrete record-a-clip-and-hand-it-back path."
 
-    private static let notWiredCamera =
-        "capturePhoto() is not wired on Brilliant yet. Both devices have a camera and the "
-        + "protocol carries photo frames, but the capture path in the on-device bundle has not "
-        + "landed. Guard on glasses.capabilities.camera."
+    /// A still crosses BLE one MTU-sized chunk at a time. Generous rather than
+    /// tight: a timeout that fires on a slow-but-working link is worse than
+    /// waiting. Matches Android's PHOTO_TIMEOUT_MS.
+    private static let photoTimeoutMs = 30_000
+
+    /// Backstop for an unbounded recordDiscrete — not a timeout the caller chose.
+    /// Matches Android's RECORD_HARD_CAP_MS.
+    private static let recordHardCapMs = 120_000
 
     private static let noVideo =
         "unavailable on Brilliant — neither device has a video primitive or a codec, and "
@@ -415,6 +575,62 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
 /// a device that disconnects during the handshake fires both a failed handshake
 /// and a disconnect, and resuming a continuation twice is a crash, not a bug you
 /// get to log.
+/// `ReadyGate` for a photo instead of a Bool. Same shape and the same reason:
+/// the value can arrive before anyone waits.
+private final class PhotoGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Data?, Never>?
+    private var settled = false
+    private var pending: Data?
+
+    func arm() {
+        lock.lock()
+        settled = false
+        pending = nil
+        continuation = nil
+        lock.unlock()
+    }
+
+    func resolve(_ value: Data?) {
+        lock.lock()
+        if settled {
+            lock.unlock()
+            return
+        }
+        settled = true
+        let c = continuation
+        continuation = nil
+        if c == nil { pending = value }
+        lock.unlock()
+        c?.resume(returning: value)
+    }
+
+    func wait(timeoutMs: Int) async -> Data? {
+        let timeout = Task {
+            try? await Task.sleep(nanoseconds: UInt64(timeoutMs) * 1_000_000)
+            if !Task.isCancelled { self.resolve(nil) }
+        }
+        defer { timeout.cancel() }
+
+        return await withCheckedContinuation { (c: CheckedContinuation<Data?, Never>) in
+            lock.lock()
+            if let value = pending {
+                pending = nil
+                lock.unlock()
+                c.resume(returning: value)
+                return
+            }
+            if settled {
+                lock.unlock()
+                c.resume(returning: nil)
+                return
+            }
+            continuation = c
+            lock.unlock()
+        }
+    }
+}
+
 private final class ReadyGate: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Bool, Never>?

@@ -100,10 +100,37 @@ final class VideoCaptureSession: @unchecked Sendable {
         }
         await Self.finishWriting(writer: writer, state: state)
 
+        // Two questions this used to skip entirely, both of which can leave a
+        // file that reports success and then will not play (RDQ #88).
+        //
+        // First: did the writer actually finish? `finishWriting` completing is
+        // not the same as it succeeding — on `.failed` the movie is unusable
+        // and `writer.error` says why.
+        //
+        // Second: is the container sealed? A writer can report `.completed`
+        // and still leave a file whose atom chain does not reach `moov`; that
+        // is exactly the defect this check was written for, caught on Android
+        // hardware. The answer lives in the shared core so both platforms judge
+        // it identically.
+        var failure: String?
+        if writer.status != .completed {
+            failure = writer.error.map { "writer \(writer.status.rawValue): \($0.localizedDescription)" }
+                ?? "writer did not complete (status \(writer.status.rawValue))"
+        } else {
+            let verdict = Mp4Structure.check(outputURL)
+            if !verdict.ok { failure = "container: \(verdict.reason)" }
+        }
+        if let failure {
+            NSLog("[Extentos] video: capture produced an unusable file — %@", failure)
+        }
+
         let durationMs = Int64(Date().timeIntervalSince(started) * 1000)
         let (width, height) = state.dimensions()
         return .success(VideoClip(
-            uri: outputURL.absoluteString,
+            // `nil` is how this type already says "produced nothing usable" —
+            // matching Android rather than inventing a new failure channel on a
+            // path that is otherwise settled.
+            uri: failure == nil ? outputURL.absoluteString : nil,
             durationMs: durationMs,
             format: config.format,
             width: Int32(width),

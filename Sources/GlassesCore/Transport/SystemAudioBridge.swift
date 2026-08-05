@@ -472,7 +472,20 @@ final class SystemAudioBridge: @unchecked Sendable {
         try session.setCategory(
             .playAndRecord,
             mode: .voiceChat,
-            options: [.allowBluetooth, .allowBluetoothA2DP]
+            // `.defaultToSpeaker` is what keeps a phone-only app AUDIBLE.
+            //
+            // Without it, `.playAndRecord` sends output to the receiver — the
+            // earpiece — so an app with no glasses attached plays the
+            // assistant at conversation-held-to-your-head volume. Reported
+            // from hardware as "I have to put my ear close to my mobile, even
+            // with the volume all the way up", which is precisely the earpiece.
+            //
+            // It is the DEFAULT, not an override: the moment a headset or the
+            // glasses connect, that route wins and audio follows them. So this
+            // is speaker-when-alone, glasses-when-worn, with no route juggling
+            // — which matters because route changes are currently reported to
+            // the core and never acted on.
+            options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker]
         )
         try session.setActive(true)
     }

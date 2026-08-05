@@ -39,10 +39,21 @@ public struct AssistantConfig: Sendable {
     /// Dormant — `say()` will throw; cleanup only).
     public let onSleep: (@Sendable (any AssistantSession) async throws -> Void)?
 
-    /// Auto-sleep after this much user+assistant silence, or nil for none.
+    /// Auto-sleep after this much user+assistant silence. Defaults to
+    /// `defaultSilenceTimeout` (60s); pass nil for a session that never sleeps
+    /// on its own.
+    ///
+    /// The default is not nil because "never" is the wrong default for a worn
+    /// device. A session left listening is not neutral: it holds the mic, bills the gateway, and reacts to whatever the wearer says to somebody else. A session that has gone quiet has almost always ended, and Dormant is cheap to leave -- a wake phrase or wake() brings it straight back with its history intact.
+    ///
     /// Tracked in the core from the realtime frames (speech, active
     /// response, playback) — `RealtimeEvent.silenceTimeout` → `sleep()`.
     public let silenceTimeout: TimeInterval?
+
+    /// 60 seconds — the default for `silenceTimeout`. Named so the value has
+    /// one home and an app can write `AssistantConfig.defaultSilenceTimeout * 2`
+    /// rather than re-deriving a number it cannot see.
+    public static let defaultSilenceTimeout: TimeInterval = 60
 
     /// Utterances that put the assistant to sleep ("goodbye", "that's all").
     /// Registered as voice handlers that stay active across wake/sleep cycles.
@@ -127,7 +138,7 @@ public struct AssistantConfig: Sendable {
         startActive: Bool = false,
         onWake: (@Sendable (any AssistantSession) async throws -> Void)? = nil,
         onSleep: (@Sendable (any AssistantSession) async throws -> Void)? = nil,
-        silenceTimeout: TimeInterval? = nil,
+        silenceTimeout: TimeInterval? = AssistantConfig.defaultSilenceTimeout,
         sleepPhrases: [String] = [],
         endOnIntent: Bool = true,
         historyCap: Int = 100,
@@ -326,7 +337,7 @@ public final class AssistantConfigBuilder: @unchecked Sendable {
 
     private var onWakeHook: (@Sendable (any AssistantSession) async throws -> Void)?
     private var onSleepHook: (@Sendable (any AssistantSession) async throws -> Void)?
-    private var silenceTimeoutValue: TimeInterval?
+    private var silenceTimeoutValue: TimeInterval? = AssistantConfig.defaultSilenceTimeout
     private var sleepPhraseList: [String] = []
 
     internal init() {}

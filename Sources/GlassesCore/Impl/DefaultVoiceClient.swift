@@ -53,12 +53,23 @@ internal final class DefaultVoiceClient: VoiceClient, @unchecked Sendable {
     private let statsState: MutableState<[String: VoiceHintStats]>
     private let core: VoiceCore
 
+    /// Per-registration `firesWhen`, read at dispatch time.
+    private var scopes: [String: VoiceScope] = [:]
+
+    /// Reads the current assistant state for VoiceScope gating. nil means no
+    /// session, treated as dormant — `.whenDormant` fires, `.whenActive` does
+    /// not. The default `{ nil }` means no gating at all, which is right for
+    /// tests and for apps that never touch the assistant runtime.
+    private let currentAssistantState: @Sendable () -> AssistantState?
+
     init(
         audio: any AudioClient,
-        clock: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
+        clock: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
+        currentAssistantState: @escaping @Sendable () -> AssistantState? = { nil }
     ) {
         self.audio = audio
         self.clock = clock
+        self.currentAssistantState = currentAssistantState
         let hintsState = MutableState<[VoiceHint]>([])
         let statsState = MutableState<[String: VoiceHintStats]>([:])
         self.hintsState = hintsState
@@ -82,6 +93,7 @@ internal final class DefaultVoiceClient: VoiceClient, @unchecked Sendable {
         phrase: String,
         label: String?,
         stops: [String],
+        firesWhen: VoiceScope,
         handler: @escaping @Sendable () async -> Void
     ) -> VoiceRegistration {
         // Register the entry and store the handler atomically under `lock`, so
@@ -92,6 +104,7 @@ internal final class DefaultVoiceClient: VoiceClient, @unchecked Sendable {
         let id: String = lock.withLock {
             let id = core.register(phrase: phrase, label: label, stops: stops, hasHandler: true)
             handlers[id] = handler
+            scopes[id] = firesWhen
             return id
         }
         ensureCollectorStarted()
@@ -161,9 +174,37 @@ internal final class DefaultVoiceClient: VoiceClient, @unchecked Sendable {
     // Channel 4 — `StartHandler`: the core matched a phrase. The shell owns the
     // execution. `lock` is held across Task creation + registration so the
     // Task's `defer` self-removal (also under `lock`) cannot run ahead of it.
+    /// Whether a registration's handler may run right now.
+    ///
+    /// The core has already matched the transcript and emitted StartHandler, so
+    /// stats and the UI fire-count are already bumped; declining here only skips
+    /// the customer's code. That is what keeps a wake phrase from double-firing
+    /// AI tools mid-conversation, and a sleep phrase from no-op-ing on a dormant
+    /// session.
+    private func shouldDispatch(_ scope: VoiceScope) -> Bool {
+        if scope == .always { return true }
+        switch currentAssistantState() {
+        case nil, .idle, .dormant, .sleeping, .stopping, .stopped:
+            return scope == .whenDormant
+        case .activating, .active, .reconnecting:
+            return scope == .whenActive
+        @unknown default:
+            // A state we have not classified: fire rather than swallow the
+            // customer's handler silently.
+            return true
+        }
+    }
+
     fileprivate func startHandler(id: String) {
         lock.withLock {
             guard !didShutdown, let handler = handlers[id] else { return }
+            if !shouldDispatch(scopes[id] ?? .whenDormant) {
+                // Tell the core the dispatch completed anyway, or its
+                // "is this handler active" tracking stays true forever on a
+                // gated registration.
+                core.notifyHandlerFinished(id: id)
+                return
+            }
             let token = UUID()
             let task = Task { [weak self] in
                 defer {
@@ -236,5 +277,30 @@ private extension NSLock {
     func withLock<T>(_ body: () -> T) -> T {
         lock(); defer { unlock() }
         return body()
+    }
+}
+
+/// Shared holder for the live assistant state, so `VoiceScope` gating can read
+/// it from a voice client that was constructed before the assistant existed.
+///
+/// Kotlin uses an `AtomicReference` the assistant pushes each transition into;
+/// iOS reads the session's own `ObservableState` on demand, so this holds the
+/// read closure rather than the value. Same contract either way: nil means no
+/// session, which counts as dormant.
+final class AssistantStateProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var read: (@Sendable () -> AssistantState?)?
+
+    func bind(_ read: @escaping @Sendable () -> AssistantState?) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.read = read
+    }
+
+    func current() -> AssistantState? {
+        lock.lock()
+        let r = read
+        lock.unlock()
+        return r?()
     }
 }

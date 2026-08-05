@@ -102,6 +102,13 @@ public final class RealMetaTransport: GlassesTransport, @unchecked Sendable {
         }
     }
 
+    /// Explicit-stop API so customers don't need the cancel-the-Task dance to
+    /// end a capture. Delegates to the same core abort both platforms use; the
+    /// in-flight `captureVideo()` resumes with the partial clip.
+    public func stopVideo() async {
+        await core.abortCaptureVideo()
+    }
+
     public func captureVideo(config: VideoConfig) async -> ExtentosResult<VideoClip, CaptureError> {
         // F-R4-05 cancellation pattern, same shape as BrowserSimTransport.
         // The customer cancels at await-time; the in-flight core future

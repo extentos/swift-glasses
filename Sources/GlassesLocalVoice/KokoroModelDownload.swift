@@ -75,7 +75,17 @@ public enum KokoroVoiceModel {
                 withIntermediateDirectories: true
             )
             guard let url = URL(string: KokoroModelManifest.repoBase + e.path) else { continue }
-            let (tmp, response) = try await session.download(from: url)
+            // `doneBytes` is what COMPLETED entries contributed; the streaming
+            // download adds this entry's bytes as they arrive, so the fraction
+            // moves DURING the file rather than only after it.
+            let completedBefore = doneBytes
+            let (tmp, response) = try await StreamingDownload.run(
+                url: url,
+                session: session,
+                onBytes: { written in
+                    progress(min(1.0, Double(completedBefore + Int(written)) / total))
+                }
+            )
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                 throw DownloadError.httpStatus(http.statusCode, path: e.path)
             }
@@ -94,6 +104,108 @@ public enum KokoroVoiceModel {
             try fm.moveItem(at: tmp, to: dest)
             doneBytes += e.size
             progress(Double(doneBytes) / total)
+        }
+    }
+
+    /// A download that reports bytes while they arrive.
+    ///
+    /// `URLSession.download(from:)` returns only when the file is complete, so
+    /// a caller learns nothing during it. That is tolerable for a manifest of
+    /// similar files and useless for this one: `model.onnx` is 93.5% of the
+    /// total, so progress showed ~5% and then fifteen minutes of silence before
+    /// jumping to 100%. The comment on `download(progress:)` already named the
+    /// failure — "file-count progress sticks at 1% while the big model
+    /// downloads" — but the byte-weighting was applied BETWEEN entries and not
+    /// WITHIN the entry that is the whole download.
+    ///
+    /// The delegate hands back a temp URL the CALLER owns. `didFinishDownloading`
+    /// deletes its location the moment the method returns, so the file is moved
+    /// out synchronously inside it — the one rule of this API that bites.
+    private final class StreamingDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+        private let onBytes: @Sendable (Int64) -> Void
+        private var continuation: CheckedContinuation<(URL, URLResponse), Error>?
+        private var finished = false
+        private let lock = NSLock()
+        /// A 64 KB socket buffer over 345 MB is ~5,500 callbacks; a progress
+        /// bar needs far fewer, and each one hops to the main actor.
+        private static let reportEveryBytes: Int64 = 256 * 1024
+        private var lastReported: Int64 = 0
+
+        private init(onBytes: @escaping @Sendable (Int64) -> Void) {
+            self.onBytes = onBytes
+        }
+
+        static func run(
+            url: URL,
+            session: URLSession,
+            onBytes: @escaping @Sendable (Int64) -> Void
+        ) async throws -> (URL, URLResponse) {
+            let delegate = StreamingDownload(onBytes: onBytes)
+            // A delegate session of its own: the caller's shared session has no
+            // delegate, and attaching one after the fact is not possible.
+            let config = session.configuration
+            let delegated = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+            defer { delegated.finishTasksAndInvalidate() }
+            let task = delegated.downloadTask(with: url)
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { cont in
+                    delegate.continuation = cont
+                    task.resume()
+                }
+            } onCancel: {
+                task.cancel()
+            }
+        }
+
+        private func settle(_ result: Result<(URL, URLResponse), Error>) {
+            lock.lock()
+            guard !finished else { lock.unlock(); return }
+            finished = true
+            let cont = continuation
+            continuation = nil
+            lock.unlock()
+            cont?.resume(with: result)
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            downloadTask: URLSessionDownloadTask,
+            didWriteData bytesWritten: Int64,
+            totalBytesWritten: Int64,
+            totalBytesExpectedToWrite: Int64
+        ) {
+            lock.lock()
+            let due = totalBytesWritten - lastReported >= Self.reportEveryBytes
+            if due { lastReported = totalBytesWritten }
+            lock.unlock()
+            if due { onBytes(totalBytesWritten) }
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            downloadTask: URLSessionDownloadTask,
+            didFinishDownloadingTo location: URL
+        ) {
+            // MUST move synchronously — `location` is gone after this returns.
+            let dest = FileManager.default.temporaryDirectory
+                .appendingPathComponent("extentos-kokoro-\(UUID().uuidString)")
+            do {
+                try FileManager.default.moveItem(at: location, to: dest)
+            } catch {
+                settle(.failure(error))
+                return
+            }
+            let response = downloadTask.response ?? URLResponse()
+            settle(.success((dest, response)))
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            didCompleteWithError error: Error?
+        ) {
+            if let error { settle(.failure(error)) }
+            // No error means didFinishDownloadingTo already settled it.
         }
     }
 

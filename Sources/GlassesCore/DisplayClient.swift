@@ -31,6 +31,23 @@ public protocol DisplayClient: Sendable {
 
     /// Clear the display (and drop the current show's handlers).
     func clear() async
+
+    /// Pre-upload a recorded clip so a later `show { video(clip:) }` is an
+    /// instant registry hit — no upload, no "Preparing…" card. Best-effort and
+    /// idempotent; reuses the same path `show()` takes, so a concurrent show of
+    /// the same clip still uploads once. Returns whether the clip is hosted and
+    /// ready after the call. Apps call it speculatively, e.g. over a list.
+    func prepareVideo(clip: VideoClip) async -> Bool
+
+    /// Release the hosted copy of a recorded clip — call when the app deletes
+    /// the source. Idempotent: forgetting a clip that was never shown is a
+    /// no-op. Teardown is tied to the SOURCE's deletion, not to clearing the
+    /// display.
+    func forgetHostedVideo(clip: VideoClip) async
+
+    /// Release the hosted copy of a photo — the mirror of `forgetHostedVideo`
+    /// on the image endpoint, sharing one registry.
+    func forgetHostedImage(photo: Photo) async
 }
 
 public extension DisplayClient {
@@ -147,4 +164,23 @@ public final class DisplayRootScope: DisplayScope {
     public func video(url: String) {
         nodes.append(.video(url: url))
     }
+
+    /// A locally-recorded clip as the full surface. The SDK hosts it at
+    /// `show()` time and renders the hosted URL — the glasses fetch http(s)
+    /// only, and the phone never proxies bytes. Hosting a large clip takes a
+    /// few seconds, so a "Preparing…" card shows meanwhile; `prepareVideo`
+    /// ahead of time makes it instant. Reuses an existing hosted copy.
+    public func video(clip: VideoClip) {
+        localClip = clip
+    }
+
+    /// A locally-captured photo as the full surface. Same shape as
+    /// `video(clip:)` and the same registry; photos host in well under a
+    /// second, so there is no "Preparing…" card.
+    public func image(photo: Photo) {
+        localPhoto = photo
+    }
+
+    var localClip: VideoClip?
+    var localPhoto: Photo?
 }

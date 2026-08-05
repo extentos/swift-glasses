@@ -106,6 +106,32 @@ final class SharedAudioInput: AudioInputSubscribing, @unchecked Sendable {
         try configureSession()
         let e = AVAudioEngine()
         let input = e.inputNode
+        // Acoustic echo cancellation, and it must happen HERE — before the
+        // format is read and before the tap goes on.
+        //
+        // `AVAudioSession`'s `.voiceChat` mode states the intent; it does not
+        // engage the Voice-Processing I/O unit for an `AVAudioEngine`. Only
+        // this call does. Without it the mic hears whatever the device plays,
+        // which was harmless while output sat on the earpiece — near-zero
+        // acoustic coupling — and became a feedback loop the moment
+        // `.defaultToSpeaker` put the assistant on the loudspeaker: it heard
+        // itself, transcribed itself, and answered itself.
+        //
+        // Deliberately NOT solved by gating the mic while speaking: that would
+        // kill barge-in, which is a designed primitive here. VPIO subtracts the
+        // device's OWN output from the input, so a real interruption still
+        // arrives intact — the echo is what disappears.
+        //
+        // Best-effort: a platform that refuses it (some simulators) keeps
+        // capturing without cancellation rather than losing the microphone.
+        // Order matters — VPIO changes the input format, so read it after.
+        var aec = false
+        do {
+            try input.setVoiceProcessingEnabled(true)
+            aec = true
+        } catch {
+            WakeLedger.shared.note("audio: voice processing UNAVAILABLE (\(error))")
+        }
         let format = input.outputFormat(forBus: 0)
         // Tap callback runs on a dedicated audio render thread. Snapshot
         // the consumer list under lock, then dispatch synchronously so the
@@ -125,8 +151,8 @@ final class SharedAudioInput: AudioInputSubscribing, @unchecked Sendable {
         lock.unlock()
         installObservers(for: e)
         WakeLedger.shared.note(String(
-            format: "audio: engine started (%.0fHz ch%d)",
-            format.sampleRate, format.channelCount
+            format: "audio: engine started (%.0fHz ch%d) aec=%@",
+            format.sampleRate, format.channelCount, aec ? "on" : "OFF"
         ))
     }
 

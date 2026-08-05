@@ -63,4 +63,9 @@ final class FakeDisplayClient: DisplayClient, @unchecked Sendable {
     var isAvailable: Bool { false }
     func show(onBack: (@Sendable () -> Void)?, content: (DisplayRootScope) -> Void) async {}
     func clear() async {}
+    // Nothing was ever hosted on a device with no display, so forgetting is a
+    // no-op here — the same idempotent contract the real client honours.
+    func prepareVideo(clip: VideoClip) async -> Bool { false }
+    func forgetHostedVideo(clip: VideoClip) async {}
+    func forgetHostedImage(photo: Photo) async {}
 }

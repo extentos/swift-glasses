@@ -30,7 +30,17 @@ let package = Package(
         .library(name: "GlassesLocalVoice", targets: ["GlassesLocalVoice"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/facebook/meta-wearables-dat-ios", from: "0.8.0"),
+        // BOUNDED, not `from:`. SPM's `from: "0.8.0"` means >=0.8.0 <1.0.0, so it
+        // resolved DAT 0.9.0 the day Meta shipped it (2026-08-03) and every fresh
+        // install stopped compiling: 0.9 removed DeviceSession.addStream, which
+        // MetaHardwareBridge calls. A published SDK cannot let a vendor's minor
+        // release decide whether it builds.
+        //
+        // The upper bound moves deliberately, with the migration, and only after
+        // the DAM question is answered on hardware — 0.9 removes the DAM opt-out
+        // we ship precisely because DAM broke camera and audio on non-display
+        // glasses in 0.8. See shared-context/dat-0.9-migration-handoff.md.
+        .package(url: "https://github.com/facebook/meta-wearables-dat-ios", "0.8.0"..<"0.9.0"),
         // MLX model serving for the on-device local tier (Apple platforms only).
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "3.31.4"),
         // The #hubDownloader / #huggingFaceTokenizerLoader macros expand to
@@ -45,8 +55,8 @@ let package = Package(
         // universal arm64/x86_64 simulator slice + macOS arm64).
         .binaryTarget(
             name: "extentos_coreFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/2.1.2/extentos_coreFFI.xcframework.zip",
-            checksum: "6be6cb6f788186db958d84078379f523d3742dd9ef1724c15cffdebd776d34a4"
+            url: "https://github.com/extentos/swift-glasses/releases/download/2.1.3/extentos_coreFFI.xcframework.zip",
+            checksum: "2870168a8677396aa5f1acebea588bd08dfa3eaaff8139eba978313e5da19e11"
         ),
         .target(
             name: "GlassesCore",
@@ -86,13 +96,13 @@ let package = Package(
         // why the voice shipped on Android months before iOS.
         .binaryTarget(
             name: "sherpaOnnxFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/2.1.2/sherpaOnnxFFI.xcframework.zip",
-            checksum: "c5d502604a0d951890aa496e924fe8e4b46c8cb7b5f3d03d862fccdfddbec4b4"
+            url: "https://github.com/extentos/swift-glasses/releases/download/2.1.3/sherpaOnnxFFI.xcframework.zip",
+            checksum: "bccc00826c28d49b0d8415bab4dd2c84a999d52e85ff302f3cc6fb290be65002"
         ),
         .binaryTarget(
             name: "onnxruntimeFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/2.1.2/onnxruntimeFFI.xcframework.zip",
-            checksum: "2147d969ca530c452125685f11d79fec48c7d52f3064e9fb63a388e0f900cd53"
+            url: "https://github.com/extentos/swift-glasses/releases/download/2.1.3/onnxruntimeFFI.xcframework.zip",
+            checksum: "cabaf58a255ef061ca4bd61d78c2e5ff5e5c9805370d36ee0c144a4d1ba59fa4"
         ),
         .target(
             name: "GlassesLocalVoice",

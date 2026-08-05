@@ -112,16 +112,16 @@ private struct ConnectionPageBody: View {
                             let kind = toggle.kind
                             let g = glasses
                             Task {
-                                await g.toggles.update { old in
-                                    var values = old.values
-                                    switch kind {
-                                    case .listeningModeEnum:
-                                        values[key] = .string(newValue ? "always_on" : "off")
-                                    case .bool:
-                                        values[key] = .bool(newValue)
-                                    }
-                                    return Toggles(values: values)
+                                // A switch on the connection page IS a user tap,
+                                // so this is the one place .ui is the honest source.
+                                let value: JSONValue
+                                switch kind {
+                                case .listeningModeEnum:
+                                    value = .string(newValue ? "always_on" : "off")
+                                case .bool:
+                                    value = .bool(newValue)
                                 }
+                                await g.toggles.put(key: key, value: value, source: .ui)
                             }
                         }
                     }

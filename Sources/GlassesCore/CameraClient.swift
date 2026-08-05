@@ -10,6 +10,14 @@ public protocol CameraClient: Sendable {
     /// wearer has paused the camera (temple tap) — the streaming analogue of the
     /// `CaptureError.streamPaused` that `capturePhoto`/`captureVideo` return. A pause
     /// that happens mid-stream is not an error: frames stop and resume on the next tap.
+    /// End an in-flight `captureVideo` early — the explicit stop a "stop
+    /// recording" button needs, instead of cancelling the Task.
+    ///
+    /// Idempotent: a no-op when no capture is active. Returns once the abort is
+    /// dispatched, before the platform's drain window completes; the partial
+    /// clip surfaces as the in-flight `captureVideo` return value.
+    func stopVideo() async
+
     func videoFrames(config: VideoFrameConfig) -> AsyncThrowingStream<VideoFrame, Error>
 
     /// The effective config the shared camera stream is currently ARMED at, or

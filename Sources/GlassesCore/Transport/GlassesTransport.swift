@@ -75,6 +75,12 @@ public protocol GlassesTransport: Sendable {
     /// Default `.narrowband` (extension below) — safe for real BT HFP/SCO
     /// glasses (8 kHz cap while the mic is open). `BrowserSimTransport`
     /// overrides to `.hiFi`; WebAudio has no such limit.
+    /// End an in-flight `captureVideo` early. Idempotent — a no-op when no
+    /// capture is active. Mirrors Kotlin `GlassesTransport.stopVideo`; the
+    /// abort logic itself is core-owned and shared by both platforms, so the
+    /// in-flight `captureVideo()` resumes with the partial clip.
+    func stopVideo() async
+
     /// Cancel any buffered outgoing assistant audio (the barge-in flush).
     /// Default no-op: transports without an outgoing audio path silently
     /// ignore the cancel. Mirrors Kotlin GlassesTransport.cancelOutgoingAudio.
@@ -154,6 +160,11 @@ public extension GlassesTransport {
     /// Default no-op — on real glasses the typed error result IS the observable
     /// surface; only `BrowserSimTransport` records the denial in the sim trace.
     func notifyCaptureDenied(op: String, reason: String, message: String) {
+        // default no-op
+    }
+
+    /// Default no-op: LocalSim has no real capture path to abort.
+    func stopVideo() async {
         // default no-op
     }
 

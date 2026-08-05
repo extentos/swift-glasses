@@ -5191,13 +5191,49 @@ public struct ClientMetadata {
     public var sdk: String
     public var sdkVersion: String
     public var platform: String
+    /**
+     * Vendor ids this BUILD could actually reach on real hardware — i.e. the
+     * vendor transport modules linked into the app (Android: `glasses-meta`
+     * and friends via `VendorTransports.reachableVendorIds()`).
+     *
+     * The simulator serves EVERY vendor regardless of what is linked, on
+     * purpose: a missing module is one Gradle line away and blocking it would
+     * stop someone trying a vendor before paying that vendor's price. The cost
+     * of that choice is that the sim is more capable than the build, and
+     * nothing said so anywhere the developer or their agent could see — the
+     * SDK computed this list and wrote it to logcat and nowhere else. Sending
+     * it lets the simulator and `getSimulatorStatus` label a vendor the app
+     * cannot actually reach, without ever blocking it.
+     *
+     * Empty is meaningful (a voice-only build reaches no vendor at all) and is
+     * NOT the same as unknown — an older SDK simply omits the field.
+     */
+    public var reachableVendors: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(sdk: String, sdkVersion: String, platform: String) {
+    public init(sdk: String, sdkVersion: String, platform: String, 
+        /**
+         * Vendor ids this BUILD could actually reach on real hardware — i.e. the
+         * vendor transport modules linked into the app (Android: `glasses-meta`
+         * and friends via `VendorTransports.reachableVendorIds()`).
+         *
+         * The simulator serves EVERY vendor regardless of what is linked, on
+         * purpose: a missing module is one Gradle line away and blocking it would
+         * stop someone trying a vendor before paying that vendor's price. The cost
+         * of that choice is that the sim is more capable than the build, and
+         * nothing said so anywhere the developer or their agent could see — the
+         * SDK computed this list and wrote it to logcat and nowhere else. Sending
+         * it lets the simulator and `getSimulatorStatus` label a vendor the app
+         * cannot actually reach, without ever blocking it.
+         *
+         * Empty is meaningful (a voice-only build reaches no vendor at all) and is
+         * NOT the same as unknown — an older SDK simply omits the field.
+         */reachableVendors: [String]) {
         self.sdk = sdk
         self.sdkVersion = sdkVersion
         self.platform = platform
+        self.reachableVendors = reachableVendors
     }
 }
 
@@ -5214,6 +5250,9 @@ extension ClientMetadata: Equatable, Hashable {
         if lhs.platform != rhs.platform {
             return false
         }
+        if lhs.reachableVendors != rhs.reachableVendors {
+            return false
+        }
         return true
     }
 
@@ -5221,6 +5260,7 @@ extension ClientMetadata: Equatable, Hashable {
         hasher.combine(sdk)
         hasher.combine(sdkVersion)
         hasher.combine(platform)
+        hasher.combine(reachableVendors)
     }
 }
 
@@ -5234,7 +5274,8 @@ public struct FfiConverterTypeClientMetadata: FfiConverterRustBuffer {
             try ClientMetadata(
                 sdk: FfiConverterString.read(from: &buf), 
                 sdkVersion: FfiConverterString.read(from: &buf), 
-                platform: FfiConverterString.read(from: &buf)
+                platform: FfiConverterString.read(from: &buf), 
+                reachableVendors: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -5242,6 +5283,7 @@ public struct FfiConverterTypeClientMetadata: FfiConverterRustBuffer {
         FfiConverterString.write(value.sdk, into: &buf)
         FfiConverterString.write(value.sdkVersion, into: &buf)
         FfiConverterString.write(value.platform, into: &buf)
+        FfiConverterSequenceString.write(value.reachableVendors, into: &buf)
     }
 }
 

@@ -115,8 +115,14 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
         )
 
         let togglesLogger = self.eventLogger
-        self._toggles = DefaultToggleClient(onChange: { key, oldVal, newVal in
-            Task { await togglesLogger.emit(.toggleChanged(key: key, oldValue: oldVal, newValue: newVal, source: .ui)) }
+        // The source comes from the CALLER now. It used to be hardcoded .ui
+        // here, which reported every assistant- and automation-driven toggle
+        // change as a user tap.
+        self._toggles = DefaultToggleClient(onChange: { key, oldVal, newVal, source in
+            Task {
+                await togglesLogger.emit(
+                    .toggleChanged(key: key, oldValue: oldVal, newValue: newVal, source: source))
+            }
         })
 
         let initialUiState = ExtentosUiState(
@@ -145,8 +151,31 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
         self._soundRegistry = soundRegistry
         self._audio = DefaultAudioClient(transport: transport, toggles: _toggles, sounds: soundRegistry, onStreamLifecycle: bridge)
         self._runtime = DefaultRuntimeClient(eventLogger: eventLogger)
-        self._voice = DefaultVoiceClient(audio: _audio)
-        self._display = DefaultDisplayClient(transport: transport)
+        // VoiceScope gating needs the live assistant state, but the voice client
+        // is built before the assistant exists. Same shape as Kotlin's
+        // AtomicReference: a shared probe handed over now and pointed at the
+        // assistant once it is constructed.
+        let assistantProbe = AssistantStateProbe()
+        self._voice = DefaultVoiceClient(
+            audio: _audio,
+            currentAssistantState: { assistantProbe.current() }
+        )
+        // D5b: hosted-media delivery for the local-media display roots. The
+        // asset→copy registry is core-owned (shared with Android); this wires the
+        // upload/delete IO and persists the snapshot across launches.
+        let hostedMedia = HostedMediaStore(file: HostedMediaStore.defaultFile())
+        let mediaEnv = effectiveEnvironment
+        self._display = DefaultDisplayClient(
+            transport: transport,
+            mediaDelivery: HttpMediaDelivery(
+                registry: hostedMedia.registry,
+                persist: { hostedMedia.persist() },
+                uploader: HttpMediaUploader(
+                    endpointFor: { kind in defaultDisplayMediaEndpoint(mediaEnv, kind) },
+                    installId: nil
+                )
+            )
+        )
         self._usedCapabilities = config.usedCapabilities
         self._observability = DefaultObservabilityClient(transport: transport)
 
@@ -203,6 +232,11 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
         } else {
             self._voiceBridge = nil
         }
+
+        // Every stored property is initialized by here, so `self` may escape:
+        // point the probe at the assistant's live session state, which is what
+        // VoiceScope gating reads on each dispatch.
+        assistantProbe.bind { [weak self] in self?._assistant.activeSession?.state.current }
 
         // Record the resolved transport selection. Emitted as a `log` event
         // so it reaches the public runtime.events stream (transport.selected

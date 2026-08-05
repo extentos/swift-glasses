@@ -437,7 +437,13 @@ final class RealtimeCoreProvider: AssistantProviderRuntime, @unchecked Sendable 
                 owner.onAssistantEvent(.userSpoke(transcript: transcript))
             case .assistantSpoke(let transcript):
                 owner.onAssistantEvent(.assistantSpoke(transcript: transcript))
-            case .toolCalled(let name, let callId, let argsJson):
+            // Bind by LABEL, not position. The generated case is
+            // `toolCalled(name:argsJson:callId:)` and this destructured it
+            // positionally as (name, callId, argsJson) — so every event carried
+            // the args JSON in `callId` and an unparseable `{}` in `args`.
+            // Android never had the bug because it reads `event.argsJson` by
+            // name, which no reordering can silently break.
+            case .toolCalled(let name, let argsJson, let callId):
                 owner.onAssistantEvent(.toolCalled(
                     name: name, args: JSONValue.parse(argsJson) ?? .object([:]), callId: callId
                 ))

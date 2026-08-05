@@ -83,6 +83,9 @@ public enum ExtentosLocalTier {
         public let displayName: String
         /// Estimated process memory the loaded model needs.
         public let requiredMb: Int
+        /// Download size in bytes — show this BEFORE asking the user to fetch.
+        /// Distinct from `requiredMb`, which is memory, not data.
+        public let totalBytes: Int64
         /// Are the weights already in the Hub cache on this device?
         public let isInstalled: Bool
         /// May `local-auto` pick this rung? False = pinnable but never
@@ -99,6 +102,25 @@ public enum ExtentosLocalTier {
         "local-qwen3-8b": "Qwen 3 8B Local",
     ]
 
+    /// Download size per rung, in bytes — what the END USER is about to spend
+    /// on their connection, which is a different number from `requiredMb` (the
+    /// process memory the loaded model needs). Android has carried this since
+    /// the tier landed; iOS could not show a size up front without it, which is
+    /// the one thing "present size up front" in the product spec requires.
+    ///
+    /// Measured from the HuggingFace repo manifests on 2026-08-03 (sum of all
+    /// files in the pinned repo). These are MLX 4-bit checkpoints and are NOT
+    /// interchangeable with Android's GGUF figures — the same rung differs by
+    /// up to 80% between the two (0.6B: 351 MB here, 639 MB there), which is
+    /// why `auto_model.rs` says the numbers must never be copied across.
+    static let sizeBytes: [String: Int64] = [
+        "local-qwen3-0.6b": 351_386_061,   // mlx-community/Qwen3-0.6B-4bit
+        "local-qwen25-1.5b": 880_172_064,  // mlx-community/Qwen2.5-1.5B-Instruct-4bit
+        "local-qwen3-1.7b": 984_015_687,   // mlx-community/Qwen3-1.7B-4bit
+        "local-qwen3-4b": 2_278_972_183,   // mlx-community/Qwen3-4B-4bit
+        "local-qwen3-8b": 4_623_784_971,   // mlx-community/Qwen3-8B-4bit
+    ]
+
     /// The on-device catalog — the same ids the dashboard offers.
     public static func models() -> [LocalModelInfo] {
         requiredMb.keys.sorted { (requiredMb[$0] ?? 0) < (requiredMb[$1] ?? 0) }
@@ -107,6 +129,7 @@ public enum ExtentosLocalTier {
                     id: id,
                     displayName: displayNames[id] ?? id,
                     requiredMb: requiredMb[id] ?? 0,
+                    totalBytes: sizeBytes[id] ?? 0,
                     isInstalled: AutoModelSelection.weightsPresent(for: id),
                     autoEligible: AutoModelSelection.autoEligibleIds.contains(id)
                 )
@@ -121,7 +144,13 @@ public enum ExtentosLocalTier {
     public struct AutoChoice: Sendable {
         public let modelId: String?
         public let isLocal: Bool
-        public let cloudReason: String?
+        /// WHY the cloud is serving, as the core's own enum rather than a
+        /// string. It used to be `String(describing:)` of this value, which is
+        /// a debug representation with no stability guarantee — and Android
+        /// stringified the same enum a different way, so an app branching on
+        /// the text worked on one platform and silently never matched on the
+        /// other. Switch on it; the wording shown to a user is the app's.
+        public let cloudReason: CloudFallbackReason?
         public let downloadTarget: String?
     }
 
@@ -135,7 +164,7 @@ public enum ExtentosLocalTier {
             return AutoChoice(
                 modelId: nil,
                 isLocal: false,
-                cloudReason: String(describing: reason),
+                cloudReason: reason,
                 downloadTarget: downloadTarget
             )
         }

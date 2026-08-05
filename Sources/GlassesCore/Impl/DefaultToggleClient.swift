@@ -2,43 +2,33 @@ import Foundation
 
 final class DefaultToggleClient: ToggleClient, @unchecked Sendable {
     private let stateRef: MutableState<Toggles>
-    private let onChange: @Sendable (String, JSONValue, JSONValue) -> Void
+    private let onChange: @Sendable (String, JSONValue, JSONValue, ToggleSource) -> Void
 
-    init(initial: Toggles = Toggles(), onChange: @escaping @Sendable (String, JSONValue, JSONValue) -> Void = { _, _, _ in }) {
+    init(
+        initial: Toggles = Toggles(),
+        onChange: @escaping @Sendable (String, JSONValue, JSONValue, ToggleSource) -> Void = { _, _, _, _ in }
+    ) {
         self.stateRef = MutableState(initial)
         self.onChange = onChange
     }
 
     var state: any ObservableState<Toggles> { stateRef }
 
-    func update(_ transform: @Sendable (Toggles) -> Toggles) async {
-        let before = stateRef.current
-        let after = transform(before)
-        stateRef.set(after)
-        // Emit per-key change events for any values that changed.
-        for (k, newV) in after.values {
-            let oldV = before.values[k] ?? .null
-            if !JSONValue.equal(oldV, newV) {
-                onChange(k, oldV, newV)
-            }
-        }
-        // Deletions also count as changes to null.
-        for (k, oldV) in before.values where after.values[k] == nil {
-            onChange(k, oldV, .null)
-        }
+    func get(key: String) -> JSONValue? {
+        stateRef.current.values[key]
     }
 
-    /// Internal write path for `set_toggle` actions — bypasses the public
-    /// `update` closure to avoid forcing callers to rebuild the whole
-    /// `Toggles` struct.
-    func put(key: String, value: JSONValue) {
+    /// The single write path, public and internal alike. `source` rides the
+    /// change event into telemetry, so a voice- or automation-driven flip is
+    /// distinguishable from a user tap.
+    func put(key: String, value: JSONValue, source: ToggleSource) {
         let before = stateRef.current
         var next = before.values
         next[key] = value
         stateRef.set(Toggles(values: next))
         let oldV = before.values[key] ?? .null
         if !JSONValue.equal(oldV, value) {
-            onChange(key, oldV, value)
+            onChange(key, oldV, value, source)
         }
     }
 }

@@ -359,7 +359,23 @@ final class PlatformSttEngine {
             }
             return
         }
+        // Onset/endpoint are traced because this whole branch is invisible
+        // otherwise. The 5-second ambient summary the meter emits is a rolling
+        // window that can END BEFORE the user speaks — it was misread that way
+        // once, as proof of a dead microphone, and cost an evening. These two
+        // lines are tied to the actual utterance instead of to wall time.
+        //
+        // If partials appear in a trace with no `speech onset` line between
+        // them, RMS never crossed the threshold and the fixed 0.012 is wrong
+        // for that route. If onset appears and `endpoint fired` does not, the
+        // silence timer is the problem. The two cases look identical from
+        // outside and need completely different fixes.
         if rms >= Self.speechRmsThreshold {
+            if !utteranceHadSpeech {
+                LocalTierDiagnostics.shared.record(
+                    String(format: "speech onset: rms=%.4f (threshold %.4f)",
+                           rms, Self.speechRmsThreshold))
+            }
             utteranceHadSpeech = true
             lastSpeechAtMs = nowMs
         } else if utteranceHadSpeech, nowMs - lastSpeechAtMs >= Self.silenceEndpointMs {
@@ -367,6 +383,8 @@ final class PlatformSttEngine {
             finishRequestedAtMs = nowMs
             meter.noteEndpointFired(nowMs: nowMs)
             tape.noteMark("endpoint", nowMs: nowMs)
+            LocalTierDiagnostics.shared.record(
+                "endpoint fired: finishAudio() after \(nowMs - lastSpeechAtMs)ms of silence")
             session?.finishAudio()
         }
     }

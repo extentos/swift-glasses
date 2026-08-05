@@ -175,7 +175,25 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
                     // session has been told the wrong SDK version since Phase 3.
                     // Kotlin had the identical bug and the identical fix.
                     sdkVersion: LibraryVersion.version,
-                    platform: "ios"
+                    platform: "ios",
+                    // What THIS BUILD could reach on real glasses, so the
+                    // simulator and getSimulatorStatus can LABEL a vendor the
+                    // app cannot reach rather than block it.
+                    //
+                    // A FIXED list on iOS, unlike Android where it comes from
+                    // the VendorTransports registry. Android's vendor modules
+                    // are optional Gradle dependencies because Meta's artifacts
+                    // sit behind a credentialed repo, so what is linked varies
+                    // per app. iOS was deliberately NOT split — SPM has no auth
+                    // gate, so that onboarding pain does not exist there and
+                    // both transports ship inside GlassesCore. Every iOS build
+                    // can therefore reach both.
+                    //
+                    // android_xr is absent because no iOS transport for it can
+                    // exist: Google's model is a projected Android activity.
+                    // If iOS ever splits its vendors (tracked as a distribution
+                    // consistency item), this must become derived like Android's.
+                    reachableVendors: ["brilliant", "meta"]
                 ),
                 initialSessionUrl: initialSessionUrl,
                 pendingMode: pendingMode,
@@ -541,6 +559,13 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
         framesLock.lock()
         displayCollectorTask = task
         framesLock.unlock()
+    }
+
+    /// Explicit-stop API so customers don't need the cancel-the-Task dance to
+    /// end a capture. Delegates to the same core abort both platforms use; the
+    /// in-flight `captureVideo()` resumes with the partial clip.
+    public func stopVideo() async {
+        await core.abortCaptureVideo()
     }
 
     public func cancelOutgoingAudio() {

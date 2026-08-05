@@ -63,6 +63,10 @@ final class DefaultCameraClient: CameraClient, @unchecked Sendable {
         return .failure(.streamPaused)
     }
 
+    func stopVideo() async {
+        await transport.stopVideo()
+    }
+
     func videoFrames(config: VideoFrameConfig) -> AsyncThrowingStream<VideoFrame, Error> {
         // THE no-camera gate. The transport-level stream is an AsyncStream with no
         // error channel, so a transport with no camera path can only finish —

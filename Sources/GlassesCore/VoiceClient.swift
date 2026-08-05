@@ -72,6 +72,7 @@ public protocol VoiceClient: Sendable {
         phrase: String,
         label: String?,
         stops: [String],
+        firesWhen: VoiceScope,
         handler: @escaping @Sendable () async -> Void
     ) -> VoiceRegistration
 
@@ -95,13 +96,16 @@ public protocol VoiceClient: Sendable {
 }
 
 public extension VoiceClient {
-    /// Convenience `onPhrase` with defaulted `label`/`stops`. Mirrors
-    /// Kotlin's defaulted parameters.
+    /// Convenience `onPhrase` with defaulted `label`/`stops`/`firesWhen`.
+    /// Mirrors Kotlin's defaulted parameters, including
+    /// `firesWhen = VoiceScope.WhenDormant`.
     func onPhrase(
         phrase: String,
+        label: String? = nil,
+        stops: [String] = [],
         handler: @escaping @Sendable () async -> Void
     ) -> VoiceRegistration {
-        onPhrase(phrase: phrase, label: nil, stops: [], handler: handler)
+        onPhrase(phrase: phrase, label: label, stops: stops, firesWhen: .whenDormant, handler: handler)
     }
 
     /// Convenience `registerHint` with defaulted `label`/`stops`.
@@ -122,6 +126,38 @@ public extension VoiceClient {
 /// `cancel()` removes the registration. The protocol is intentionally
 /// minimal — no `id` on the surface (the customer can hold the
 /// returned handle and ignore identity).
+/// Handle for one registered phrase.
+///
+/// `id` is the hint id the library issued — the same id `reportFired(id:)` and
+/// `VoiceHint` use. Without it, `reportFired` was documented but unreachable:
+/// the only way to find your own registration's id was to search
+/// `voice.hints.current` by phrase string.
 public protocol VoiceRegistration: Sendable {
+    var id: String { get }
     func cancel()
+}
+
+/// When a registered phrase's HANDLER runs, relative to the assistant's state.
+///
+/// The matching itself always happens — the hint still shows fire counts and
+/// active state in the UI — only the handler invocation is gated.
+///
+/// Ported from Kotlin 2026-08-03. Before that iOS had no scope at all, so every
+/// phrase behaved as `.always`: a customer wake phrase could fire in the middle
+/// of an active conversation and race the model's own tool dispatch, which is
+/// exactly what `whenDormant` exists to prevent.
+public enum VoiceScope: Sendable {
+    /// Fire regardless of assistant state. For utility commands that should work
+    /// both during and outside conversations — a "cancel everything" phrase.
+    case always
+
+    /// Fire only while the assistant is dormant (idle, dormant, sleeping) or has
+    /// no session. The recommended default for wake phrases and most customer
+    /// commands: it avoids racing AI tool dispatch during a conversation.
+    case whenDormant
+
+    /// Fire only while the assistant is active-ish (activating, active,
+    /// reconnecting). The library uses this for `sleepOnPhrase`, so a goodbye
+    /// said when nothing is running doesn't try to sleep a absent session.
+    case whenActive
 }

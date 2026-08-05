@@ -279,7 +279,7 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
                 // Sleep phrases stay registered across wake/sleep cycles;
                 // sleep() from a non-sleepable state is a core-gate no-op.
                 // (Kotlin scopes these WhenActive for log hygiene; the iOS
-                // VoiceScope port is a flagged follow-up.)
+                // VoiceScope landed 2026-08-03.)
                 registerSleepPhrases()
                 stateRef.set(.dormant)
 
@@ -476,7 +476,11 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
     private func registerSleepPhrases() {
         guard let voice else { return }
         for phrase in config.sleepPhrases {
-            let reg = voice.onPhrase(phrase: phrase) { [weak self] in
+            // firesWhen .whenActive: a "goodbye" said while the session is
+            // already dormant shouldn't try to sleep it. Matches Kotlin.
+            let reg = voice.onPhrase(
+                phrase: phrase, label: nil, stops: [], firesWhen: .whenActive
+            ) { [weak self] in
                 try? await self?.sleep()
             }
             sleepPhraseRegistrations.append(reg)

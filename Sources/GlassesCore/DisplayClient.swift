@@ -117,6 +117,16 @@ public class DisplayScope {
         mainAlign: Alignment = .start,
         crossAlign: Alignment = .stretch,
         gap: UInt32 = 0,
+        /// Whether children wrap onto additional lines when they exceed the main
+        /// axis. The panel is small and Meta does not support horizontal
+        /// scrolling, so an over-wide row is clipped — wrapping is the only way
+        /// it stays visible.
+        wrap: Bool = false,
+        /// What happens when this container's content exceeds the panel.
+        /// Defaults to `.auto`: content scrolls where the device scrolls and
+        /// pages where it cannot, so a list never needs a hand-picked row cap
+        /// (which is wrong on some panel by construction).
+        overflow: Overflow = .auto,
         padding: EdgeInsets = EdgeInsets(top: 0, right: 0, bottom: 0, left: 0),
         background: Background = .none,
         onClick: (@Sendable () -> Void)? = nil,
@@ -138,6 +148,8 @@ public class DisplayScope {
             mainAlign: mainAlign,
             crossAlign: crossAlign,
             gap: gap,
+            wrap: wrap,
+            overflow: overflow,
             padding: padding,
             background: background,
             onClick: clickId,

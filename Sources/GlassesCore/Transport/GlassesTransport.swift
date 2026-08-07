@@ -102,6 +102,19 @@ public protocol GlassesTransport: Sendable {
     /// claim a screen the device doesn't have.
     func isDisplayCapable() -> Bool
 
+    /// The connected device's physical panel, or nil when nothing with a screen
+    /// is connected (and when this build meets a device model it has never heard
+    /// of — see `panelForDevice` in the core).
+    ///
+    /// The SDK needs this to answer `Overflow` for real: whether the panel can
+    /// scroll, and if it cannot, where the page breaks fall. Transports resolve
+    /// it from the registry-generated core table rather than carrying their own
+    /// numbers, so every consumer of the display tree agrees on the geometry.
+    ///
+    /// Default nil — a transport with no display has no panel, and a caller must
+    /// handle absence rather than inherit some other vendor's shape.
+    func displayPanel() -> PanelGeometry?
+
     var outgoingAudioFidelity: OutgoingAudioFidelity { get }
 
     /// The effective config the transport's camera stream is currently armed
@@ -110,6 +123,17 @@ public protocol GlassesTransport: Sendable {
     /// transports without a shared-stream constraint surface. Mirrors Kotlin
     /// `GlassesTransport.activeStreamInfo()`.
     func activeStreamInfo() -> ActiveStreamInfo?
+
+    /// The camera stream's ACTIVITY phase over time — the axis orthogonal to
+    /// the connection state's `camera: CameraStatus` (health). Backs
+    /// `CameraClient.streamState()`. Multi-consumer and self-seeding: a new
+    /// subscriber immediately receives the current phase, because the event
+    /// stream itself carries no replay. Mirrors Kotlin
+    /// `GlassesTransport.cameraStreamState()` (a plain seed getter there —
+    /// Kotlin's `events` is a broadcast `SharedFlow`, so the client can derive
+    /// the transitions itself; iOS's `events` is single-consumer, so the
+    /// fan-out has to live here instead).
+    var cameraStreamState: any ObservableState<CameraStreamState> { get }
 
     /// Why this transport cannot serve camera at all, or `nil` when it can.
     ///
@@ -146,6 +170,11 @@ public extension GlassesTransport {
     /// first-armer lock; `BrowserSimTransport` reports its own stream registry;
     /// `LocalSim` inherits this.
     func activeStreamInfo() -> ActiveStreamInfo? { nil }
+
+    /// Default: a transport with no camera stream is permanently idle.
+    var cameraStreamState: any ObservableState<CameraStreamState> {
+        permanentlyIdleCameraStream
+    }
 
     /// Default: this transport has a camera path. Only the transports that
     /// genuinely cannot serve frames override — `SystemAudioTransport` (no
@@ -193,6 +222,8 @@ public extension GlassesTransport {
     }
 
     func isDisplayCapable() -> Bool { false }
+
+    func displayPanel() -> PanelGeometry? { nil }
 
     var outgoingAudioFidelity: OutgoingAudioFidelity { .narrowband }
 }

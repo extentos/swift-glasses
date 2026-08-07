@@ -183,6 +183,13 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
 
     public nonisolated func isDisplayCapable() -> Bool { core.device() != nil }
 
+    /// The vendor this exists for: neither Brilliant device can scroll, so the
+    /// SDK pages, and paging needs the panel. Halo and Frame are different
+    /// shapes (a 256px circle and a 640x400 rectangle) and must not share one.
+    public nonisolated func displayPanel() -> PanelGeometry? {
+        core.device().map(brilliantModelId).flatMap(panelForDevice)
+    }
+
     public func showDisplay(
         root: DisplayNode,
         onSelect: @escaping @Sendable (String) -> Void,

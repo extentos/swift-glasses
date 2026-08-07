@@ -33,6 +33,9 @@ public final class RealMetaTransport: GlassesTransport, @unchecked Sendable {
 
     private let bridge: MetaHardwareBridge
     private let core: RealMetaCore
+    /// Held (not just handed to the core) so the camera ACTIVITY axis it fans
+    /// out is reachable — see `ShellEventObserver.cameraStreamState`.
+    private let eventObserver: ShellEventObserver
 
     public init() {
         let (stream, continuation) = AsyncStream<TransportEvent>.makeStream(
@@ -43,9 +46,11 @@ public final class RealMetaTransport: GlassesTransport, @unchecked Sendable {
 
         let bridge = MetaHardwareBridge()
         self.bridge = bridge
+        let observer = ShellEventObserver(continuation: continuation)
+        self.eventObserver = observer
         self.core = RealMetaCore(
             bridge: bridge,
-            events: ShellEventObserver(continuation: continuation)
+            events: observer
         )
         bridge.attachCore(core)
         // Hardware observers are independent of `connect()` — start eagerly
@@ -236,6 +241,13 @@ public final class RealMetaTransport: GlassesTransport, @unchecked Sendable {
     /// `RealMetaTransport.activeStreamInfo() = bridge.activeStreamInfo()`.
     public nonisolated func activeStreamInfo() -> ActiveStreamInfo? { bridge.activeStreamInfo() }
 
+    /// The activity axis. The PHASE is core-owned (one normalization of DAT's
+    /// 7-value StreamState, shared with Android); only the armed config above
+    /// stays bridge-owned, because it comes off the DAT stream object.
+    public nonisolated var cameraStreamState: any ObservableState<CameraStreamState> {
+        eventObserver.cameraStreamState
+    }
+
     public nonisolated func audioChunks(config: AudioChunkConfig) -> AsyncStream<AudioChunk> {
         bridge.audioChunksStream(config: config)
     }
@@ -291,6 +303,36 @@ public final class RealMetaTransport: GlassesTransport, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    // MARK: - Display
+
+    /// Whether the connected Meta device has a panel — `Device.supportsDisplay()`
+    /// via the bridge, true on Meta Ray-Ban Display and false on every audio-only
+    /// model. Backs `glasses.display.isAvailable`.
+    ///
+    /// This inherited the protocol default `false` before MWDATDisplay was wired,
+    /// which meant `glasses.display.isAvailable` was false on real Ray-Ban Display
+    /// hardware and every display call was a silent no-op.
+    public func isDisplayCapable() -> Bool { bridge.isDisplayCapable() }
+
+    /// Ray-Ban Display is the only Meta device with a panel, so the capability
+    /// answer resolves the model. Read from the registry-generated core table
+    /// rather than typed here, exactly as the Android transport does.
+    public func displayPanel() -> PanelGeometry? {
+        bridge.isDisplayCapable() ? panelForDevice(modelId: "rayban_display") : nil
+    }
+
+    public func showDisplay(
+        root: DisplayNode,
+        onSelect: @escaping @Sendable (String) -> Void,
+        onBack: (@Sendable () -> Void)?
+    ) async {
+        await bridge.showDisplay(root: root, onSelect: onSelect, onBack: onBack)
+    }
+
+    public func clearDisplay() async {
+        await bridge.clearDisplay()
     }
 }
 

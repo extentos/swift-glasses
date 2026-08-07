@@ -35,6 +35,9 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
     private let bridge: URLSessionWebSocketBridge
     private let core: BrowserSimCore
     private let mcpWhoamiUrl: String
+    /// Held so the camera ACTIVITY axis it fans out is reachable — see
+    /// `ShellEventObserver.cameraStreamState`.
+    private let eventObserver: ShellEventObserver
 
     // Phase 4 / S2.M.4 — raw inbound JSON-text frames from the sim
     // WebSocket. Surfaced for shell-level consumers that need to observe
@@ -163,9 +166,11 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
             session: URLSession(configuration: .default)
         )
         self.bridge = bridge
+        let observer = ShellEventObserver(continuation: continuation)
+        self.eventObserver = observer
         self.core = BrowserSimCore(
             bridge: bridge,
-            events: ShellEventObserver(continuation: continuation),
+            events: observer,
             log: SwiftLogSink(),
             clock: SystemClock(),
             config: BrowserSimConfig(
@@ -421,6 +426,13 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
         return activeVideoStreams.values.first
     }
 
+    /// The activity axis — core-owned, so the sim reports the identical phase
+    /// sequence to hardware (including the momentary `arming`) and an app
+    /// written against the simulator meets no new states on glasses.
+    public nonisolated var cameraStreamState: any ObservableState<CameraStreamState> {
+        eventObserver.cameraStreamState
+    }
+
     private struct I420Frame { let width: Int; let height: Int; let bytes: Data }
 
     /// Decode a JPEG to planar I420 (BT.601), even-cropped — the iOS sim twin of
@@ -504,6 +516,15 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
     public func isDisplayCapable() -> Bool {
         framesLock.lock(); defer { framesLock.unlock() }
         return _simDisplayCapable
+    }
+
+    /// The panel of the model this session is simulating. Follows the device
+    /// picker live for the same reason `isDisplayCapable` does: switching the
+    /// sim to Brilliant Halo has to change how the tree is laid out, or the
+    /// simulator draws one device while the SDK reasons about another.
+    public func displayPanel() -> PanelGeometry? {
+        guard isDisplayCapable(), let model = core.deviceModelId() else { return nil }
+        return panelForDevice(modelId: model)
     }
 
     public func showDisplay(
@@ -844,11 +865,25 @@ final class URLSessionWebSocketBridge: WebSocketBridge, @unchecked Sendable {
 final class ShellEventObserver: TransportEventObserver, @unchecked Sendable {
     private let continuation: AsyncStream<TransportEvent>.Continuation
 
+    /// The camera ACTIVITY axis, fanned out separately from `events`.
+    ///
+    /// `events` is a single-consumer `AsyncStream` already owned by
+    /// `DefaultConnectionClient`; a second `for await` over it would STEAL
+    /// events from the connection client rather than duplicate them. Any
+    /// number of app screens may watch a stream, so this axis needs real
+    /// multi-consumer fan-out — which `MutableState` provides, and which also
+    /// yields the current value on subscribe (the seed the Kotlin side has to
+    /// arrange by hand with `onSubscription`).
+    let cameraStreamState = MutableState<CameraStreamState>(.idle)
+
     init(continuation: AsyncStream<TransportEvent>.Continuation) {
         self.continuation = continuation
     }
 
     func onEvent(event: TransportEvent) {
+        if case .cameraStreamStateChanged(let state) = event {
+            cameraStreamState.set(state)
+        }
         continuation.yield(event)
     }
 }

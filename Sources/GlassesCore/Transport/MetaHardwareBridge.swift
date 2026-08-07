@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 #if os(iOS)
 import AVFoundation
@@ -7,6 +8,7 @@ import CallKit
 import UIKit
 import MWDATCore
 import MWDATCamera
+import MWDATDisplay
 
 /// The Meta DAT iOS impl of the vendor-agnostic [`HardwareBridge`]. Holds
 /// the platform-glue (MWDAT SDK calls, `AVSpeechSynthesizer`,
@@ -60,6 +62,9 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
     private var streamSessionStateToken: (any MWDATCore.AnyListenerToken)?
     private var streamSessionErrorToken: (any MWDATCore.AnyListenerToken)?
     private var currentDevice: DeviceInfo?
+    // Display capability (MWDATDisplay). Attached to the same DeviceSession the
+    // camera uses, exactly like Android attaches its Display alongside Stream.
+    private var display: MWDATDisplay.Display?
 
     // Eager device-reachability observer (dogfood fix 2026-07-12): mirrors
     // Android's attachReachabilityObserver. WITHOUT it the core never learns a
@@ -373,14 +378,21 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
                     }
                 }
                 let session = try wearables.createSession(deviceSelector: selector)
+                // The DAT device behind this session — the only source of the
+                // model identity, and the reason it went unreported until now.
+                let metaDevice = wearables.deviceForIdentifier(session.deviceId)
                 let info = DeviceInfo(
                     id: session.deviceId,
-                    modelName: "Meta Ray-Ban",
+                    modelName: metaDevice?.nameOrId() ?? "Meta Ray-Ban",
                     firmwareVersion: "",
-                    deviceType: .metaRayban,
+                    deviceType: mapMetaDeviceType(metaDevice?.deviceType()),
                     vendor: "meta",
-                    // Wire-id mapping (Kotlin wireIdOf) lands with the DAT 0.8 port.
-                    modelId: nil
+                    // Was hardcoded nil with a note that the mapping would "land
+                    // with the DAT 0.8 port". It never did, so iOS reported every
+                    // Meta device as a plain Ray-Ban Meta — no way to tell a
+                    // Ray-Ban Display apart, which is also why the display panel
+                    // could not be resolved from identity.
+                    modelId: deviceTypeWireId(deviceType: mapMetaDeviceType(metaDevice?.deviceType()))
                 )
                 self.lock.lock()
                 self.deviceSession = session
@@ -1447,6 +1459,148 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
     private func snapshotDeviceSession() -> MWDATCore.DeviceSession? {
         lock.lock(); defer { lock.unlock() }
         return deviceSession
+    }
+
+    private static let displayLog = Logger(subsystem: "com.extentos.glasses", category: "display")
+    private var displayLog: Logger { Self.displayLog }
+
+    // MARK: - Display capability (MWDATDisplay)
+    //
+    // Android parity (MetaHardwareBridge.kt "Display capability"): attach a
+    // Display to the shared DeviceSession, then send the translated DisplayNode
+    // tree. Whole-display replace per send; button and container presses route
+    // back to the developer's onClick by node id.
+    //
+    // iOS differs from Android in two places and both are the vendor's shape,
+    // not ours: `Display.start()` EXISTS here (Android's addDisplay auto-starts,
+    // so it only awaits STARTED), and a root video is a DisplayableView sent
+    // like any other root rather than a player constructed inside the send.
+
+    func showDisplay(
+        root: DisplayNode,
+        onSelect: @escaping @Sendable (String) -> Void,
+        onBack: (@Sendable () -> Void)? = nil
+    ) async {
+        guard let disp = await ensureDisplayStarted() else { return }
+        guard let view = metaRootView(root, onSelect: onSelect) else { return }
+        // Whole-display replace: whatever video was playing belongs to the
+        // PREVIOUS content, so stop it before the new frame goes out.
+        await disp.sendVideoStop()
+        // Fire-and-forget, like Android: display degradation never throws
+        // upstream into customer code.
+        //
+        // DSP-10 parity: onBack is accepted for a stable call shape with
+        // BrowserSim (which routes the sim's display_back frames) but is not
+        // wired to a hardware gesture yet — same state as Android, where the
+        // back-gesture event API waits on the real-hardware display pass.
+        do {
+            try await disp.send(view)
+        } catch {
+            // A failed send is invisible on an additive panel — no light is
+            // indistinguishable from no content — so it must not be swallowed
+            // (the DSP-21 lesson). Non-throwing all the same: display
+            // degradation never breaks the host app.
+            displayLog.warning("display.send failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    func clearDisplay() async {
+        let current = lock.withLock { () -> MWDATDisplay.Display? in
+            let d = display
+            display = nil
+            return d
+        }
+        guard let current else { return }
+        await current.sendVideoStop()
+        try? await current.clearDisplay()
+        current.stop()
+    }
+
+    /// Whether the CONNECTED device can render a display.
+    ///
+    /// `Device.supportsDisplay()` is the iOS twin of Android's
+    /// `Device.isDisplayCapable()` — true on Meta Ray-Ban Display, false on the
+    /// audio-only Ray-Ban and Oakley models. Synchronous, because it backs
+    /// `glasses.display.isAvailable`, which SwiftUI reads during rendering.
+    ///
+    /// Wrapped so a vendor throw can never cross the transport boundary. Android
+    /// learned this the hard way: reading DAT device state before `configure()`
+    /// throws, and because the capability surface is a property getter read
+    /// during view composition, an uninitialised SDK took the host app down
+    /// instead of degrading. "Can this device show things?" has an honest answer
+    /// when the vendor SDK is not alive: no.
+    func isDisplayCapable() -> Bool {
+        // Gate on SDK-ready BEFORE touching Wearables.shared. Reading it before
+        // Wearables.configure() completes trips a DAT assertion — that is the
+        // build-31 crash-loop this flag already exists to prevent, and this
+        // method is the exact shape that made it fatal on Android: a capability
+        // getter read during view rendering, so an uninitialised SDK took the
+        // host app down instead of degrading. "Can this device show things?" has
+        // an honest answer when the vendor SDK is not alive: no.
+        lock.lock(); let ready = reachabilityReady; lock.unlock()
+        guard ready else { return false }
+        let wearables = MWDATCore.Wearables.shared
+        return wearables.devices.contains { id in
+            wearables.deviceForIdentifier(id)?.supportsDisplay() == true
+        }
+    }
+
+    private func ensureDisplayStarted() async -> MWDATDisplay.Display? {
+        if let existing = lock.withLock({ display }) {
+            let s = existing.state
+            if s == .started || s == .starting { return existing }
+        }
+        guard let session = await ensureDeviceSessionForDisplay() else { return nil }
+        guard let opened = try? session.addDisplay() else { return nil }
+        lock.withLock { display = opened }
+        opened.start()
+        // Await STARTED (bounded, 2s) so the first send is not dropped while the
+        // capability is still STARTING — the same bound Android uses.
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline {
+            if opened.state == .started { return opened }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return opened.state == .started ? opened : nil
+    }
+
+    /// A started DeviceSession to attach the display to. Reuses the live one the
+    /// camera path already manages; rebuilds it only when there is none, so a
+    /// display show never disturbs a running capture.
+    private func ensureDeviceSessionForDisplay() async -> MWDATCore.DeviceSession? {
+        // Reuse anything that is not already dead, matching Android's
+        // ensureDeviceSessionStarted. Requiring `.started` here would tear down a
+        // session that is merely mid-start — and a rebuild stops the camera
+        // stream with it, so a display show could kill a running capture.
+        if let existing = lock.withLock({ deviceSession }) {
+            let st = existing.state
+            if st != .stopped && st != .stopping {
+                // Wait briefly for a starting session rather than racing it.
+                let deadline = Date().addingTimeInterval(2.0)
+                while Date() < deadline && existing.state != .started {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+                if existing.state == .started { return existing }
+            }
+        }
+        guard await rebuildDeviceSessionLikeAndroid() else { return nil }
+        return lock.withLock { deviceSession }
+    }
+
+    /// Meta's `DeviceType` → the core's closed `DeviceType`. Mirrors Android's
+    /// `mapDeviceType`; `deviceTypeWireId` in the core then turns it into the
+    /// shared wire id ("rayban_display", …) both platforms and the backend speak.
+    private func mapMetaDeviceType(_ dt: MWDATCore.DeviceType?) -> DeviceType {
+        switch dt {
+        case .rayBanMeta: return .metaRayban
+        case .metaRayBanDisplay: return .metaRaybanDisplay
+        case .oakleyMetaHSTN: return .oakleyMetaHstn
+        case .oakleyMetaVanguard: return .oakleyMetaVanguard
+        case .rayBanMetaOptics: return .raybanMetaOptics
+        case .metaGlasses: return .metaGlasses
+        case .unknown, .none: return .unknown
+        @unknown default: return .unknown
+        }
     }
 
     private func takeDeviceSession() -> MWDATCore.DeviceSession? {

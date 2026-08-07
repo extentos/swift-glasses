@@ -80,7 +80,10 @@ final class VideoCaptureSession: @unchecked Sendable {
                 writer.startSession(atSourceTime: startPTS)
                 state.markSessionStarted(atPTS: startPTS)
             }
-            if state.videoInput?.isReadyForMoreMediaData == true {
+            // Drop once finalization has begun: appending to a finished input
+            // raises the same ObjC exception markAsFinished does, and this loop is
+            // cancelled cooperatively so a frame can land after the writer closed.
+            if !state.isClosing(), state.videoInput?.isReadyForMoreMediaData == true {
                 let ok = state.videoInput?.append(sample) ?? false
                 if ok {
                     state.bumpFrameCount()
@@ -239,8 +242,36 @@ final class VideoCaptureSession: @unchecked Sendable {
         return dir.appendingPathComponent("extentos-video-\(UUID().uuidString).\(ext)")
     }
 
+    /// Finalize ONLY a writer that is actually writing.
+    ///
+    /// `AVAssetWriter.finishWriting` and `AVAssetWriterInput.markAsFinished` both
+    /// RAISE an Objective-C exception when the writer is not `.writing`. That is
+    /// not a Swift error — nothing here can catch it — so it takes the host app
+    /// down with `abort()`.
+    ///
+    /// The writer starts LAZILY: `startWriting()` runs on the first frame, because
+    /// the input descriptor has to match the source format, which we only learn
+    /// from a sample buffer. But finalization runs on EVERY exit path. So a capture
+    /// that ends before the first frame arrives — the wearer stops during the
+    /// camera's arming window, the stream never delivers, the frame source closes
+    /// empty — reaches here with the writer still `.unknown`, and finalizing it
+    /// crashes the app. Deterministically, not as a race.
+    ///
+    /// Hardware 2026-08-06, on the PUBLISHED 2.1.3 against DAT 0.8: recording
+    /// started, stopped before frames flowed, SIGABRT inside
+    /// `-[AVAssetWriterHelper finishWritingWithCompletionHandler:]`. A `.failed`
+    /// writer (an append error, or the device ending the session mid-clip) traps
+    /// the same way.
+    ///
+    /// Skipping is correct rather than merely safe: the caller already inspects
+    /// `writer.status` immediately after this and turns anything short of
+    /// `.completed` into a failure with no URI, which is exactly what an empty or
+    /// broken capture should return. Kotlin has been guarded for its twin of this
+    /// since RDQ #88 (`muxerClosing`); iOS never was.
     private static func finishWriting(writer: AVAssetWriter, state: WriterState) async {
-        state.markInputsFinished()
+        let isWriting = writer.status == .writing
+        state.markInputsFinished(writerIsWriting: isWriting)
+        guard isWriting else { return }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             writer.finishWriting {
                 cont.resume()
@@ -272,6 +303,8 @@ private final class WriterState: @unchecked Sendable {
     private var audioAnchorPTS: CMTime?
     private var audioAppended: Int = 0
     private var audioDroppedPreSession: Int = 0
+    /// Latched under the lock the moment finalization starts.
+    private var closing = false
 
     func setDimensions(width: Int, height: Int) {
         lock.lock(); self.width = width; self.height = height; lock.unlock()
@@ -312,6 +345,9 @@ private final class WriterState: @unchecked Sendable {
     func handleAudioBuffer(_ buffer: AVAudioPCMBuffer, when: AVAudioTime) {
         lock.lock()
         defer { lock.unlock() }
+        // The tap keeps firing while finalization runs — same latch as the video
+        // path, same exception if a late buffer reaches a finished input.
+        guard !closing else { return }
         guard let input = audioInput, let cmFormat = cmAudioFormat else { return }
         // Samples can only join the timeline once the writer session exists
         // (it opens on the first video frame).
@@ -348,11 +384,28 @@ private final class WriterState: @unchecked Sendable {
         return frameCount
     }
 
-    func markInputsFinished() {
+    /// Latch the writer closed, and mark the inputs finished only while the writer
+    /// is still writing — `markAsFinished()` raises otherwise, and on an
+    /// already-finished input too, so this is idempotent.
+    ///
+    /// `closing` also stops the append paths. The frame loop and the audio tap are
+    /// cancelled COOPERATIVELY, so a buffer already in flight can arrive after
+    /// finalization begins; appending to a finished input is the same exception by
+    /// another route. Dropping a clip's tail beats crashing the host app.
+    func markInputsFinished(writerIsWriting: Bool) {
         lock.lock()
+        defer { lock.unlock() }
+        guard !closing else { return }
+        closing = true
+        guard writerIsWriting else { return }
         videoInput?.markAsFinished()
         audioInput?.markAsFinished()
-        lock.unlock()
+    }
+
+    /// True once finalization has begun — every append must drop.
+    func isClosing() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return closing
     }
 
     // MARK: - Audio CMSampleBuffer plumbing

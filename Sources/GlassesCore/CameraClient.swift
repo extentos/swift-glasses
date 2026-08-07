@@ -30,6 +30,36 @@ public protocol CameraClient: Sendable {
     ///
     /// Android parity: `CameraClient.activeStreamInfo()` (gap-ledger C2).
     func activeStreamInfo() -> ActiveStreamInfo?
+
+    /// The camera stream's ACTIVITY over time — is a stream arming, running,
+    /// system-paused, or winding down. The axis orthogonal to the connection's
+    /// `camera: CameraStatus`, which is HEALTH ("will a capture work?").
+    ///
+    /// Use this to drive work that must follow the stream rather than the link:
+    /// a live relay, a recorder, a frame-processing pipeline. In particular
+    /// `.paused` is a state the connection state cannot show you — DAT 0.8
+    /// pauses the stream when the wearer folds the glasses or another app takes
+    /// the device session, so frames stop while the connection stays perfectly
+    /// healthy. Without this, an app relaying frames onward just goes quiet
+    /// with no signal.
+    ///
+    /// Emits the current phase immediately on subscription, then only on real
+    /// transitions. Pair with `activeStreamInfo()` for the config a running
+    /// stream locked at.
+    ///
+    /// ```swift
+    /// for await phase in glasses.camera.streamState() {
+    ///     switch phase {
+    ///     case .streaming: relay.resume()
+    ///     case .paused:    relay.hold("folded or pre-empted")
+    ///     case .idle:      relay.stop()
+    ///     default:         break
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// Android parity: `CameraClient.streamState(): Flow<CameraStreamState>`.
+    func streamState() -> AsyncStream<CameraStreamState>
 }
 
 public extension CameraClient {
@@ -43,6 +73,11 @@ public extension CameraClient {
     /// Default: no observable armed stream. Transports without a shared-stream
     /// constraint surface inherit this (mirrors the Kotlin interface default).
     func activeStreamInfo() -> ActiveStreamInfo? { nil }
+
+    /// Default: no camera stream, so permanently idle.
+    func streamState() -> AsyncStream<CameraStreamState> {
+        permanentlyIdleCameraStream.stream
+    }
 }
 
 /// The effective config the shared warm camera stream is ARMED at (gap-ledger

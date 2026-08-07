@@ -107,6 +107,15 @@ final class DefaultCameraClient: CameraClient, @unchecked Sendable {
 
     func activeStreamInfo() -> ActiveStreamInfo? { transport.activeStreamInfo() }
 
+    // The transport fans this out (see `ShellEventObserver.cameraStreamState`)
+    // rather than the client deriving it from `events`, because `events` is a
+    // single-consumer AsyncStream already owned by DefaultConnectionClient.
+    // `MutableState.stream` yields the current phase on subscribe, so the seed
+    // is atomic — no read-then-subscribe gap to close.
+    func streamState() -> AsyncStream<CameraStreamState> {
+        transport.cameraStreamState.stream
+    }
+
     private func wrapVideo(_ stream: AsyncStream<VideoFrame>, config: VideoFrameConfig) -> AsyncStream<VideoFrame> {
         guard let hook = onStreamLifecycle else { return stream }
         let props: [String: JSONValue] = [

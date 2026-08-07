@@ -5,6 +5,10 @@ import Foundation
 // current value once and then yields every subsequent mutation. Matches
 // StateFlow semantics from the Kotlin library.
 
+/// The `cameraStreamState` a transport with no camera path reports: idle, and
+/// never anything else. Shared because nothing ever calls `set` on it.
+let permanentlyIdleCameraStream = MutableState<CameraStreamState>(.idle)
+
 final class MutableState<Element: Sendable>: ObservableState, @unchecked Sendable {
     typealias Element = Element
 

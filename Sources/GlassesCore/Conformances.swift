@@ -62,6 +62,7 @@ extension StreamConfig: @unchecked Sendable {}
 extension Transcript: @unchecked Sendable {}
 extension HardwareAlert: @unchecked Sendable {}
 extension ActiveState: @unchecked Sendable {}
+extension CameraStreamState: @unchecked Sendable {}
 extension DisconnectCause: @unchecked Sendable {}
 extension GlassesState: @unchecked Sendable {}
 extension SimulatorHint: @unchecked Sendable {}

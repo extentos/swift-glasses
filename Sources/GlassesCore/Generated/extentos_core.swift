@@ -1052,6 +1052,12 @@ public protocol BrowserSimCoreProtocol : AnyObject {
     func abortCaptureVideo() async 
     
     /**
+     * The current activity phase — the subscriber seed, since the event
+     * stream carries no replay. Twin of `RealMetaCore::camera_stream_state`.
+     */
+    func cameraStreamState()  -> CameraStreamState
+    
+    /**
      * Cancel the currently-speaking utterance — fire-and-forget.
      */
     func cancelSpeak() 
@@ -1345,6 +1351,17 @@ open func abortCaptureVideo()async  {
             errorHandler: nil
             
         )
+}
+    
+    /**
+     * The current activity phase — the subscriber seed, since the event
+     * stream carries no replay. Twin of `RealMetaCore::camera_stream_state`.
+     */
+open func cameraStreamState() -> CameraStreamState {
+    return try!  FfiConverterTypeCameraStreamState.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_browsersimcore_camera_stream_state(self.uniffiClonePointer(),$0
+    )
+})
 }
     
     /**
@@ -2486,6 +2503,12 @@ public protocol RealMetaCoreProtocol : AnyObject {
     func abortCaptureVideo() async 
     
     /**
+     * The current activity phase — the seed for a subscriber, since the event
+     * stream carries no replay.
+     */
+    func cameraStreamState()  -> CameraStreamState
+    
+    /**
      * Cancel the currently-speaking utterance — fire-and-forget. The bridge
      * stops its TTS engine; the in-flight `speak` future resolves on the
      * bridge's `on_speak_completed` (with or without an error depending on
@@ -2726,6 +2749,17 @@ open func abortCaptureVideo()async  {
             errorHandler: nil
             
         )
+}
+    
+    /**
+     * The current activity phase — the seed for a subscriber, since the event
+     * stream carries no replay.
+     */
+open func cameraStreamState() -> CameraStreamState {
+    return try!  FfiConverterTypeCameraStreamState.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_realmetacore_camera_stream_state(self.uniffiClonePointer(),$0
+    )
+})
 }
     
     /**
@@ -7624,6 +7658,138 @@ public func FfiConverterTypePanel_lower(_ value: Panel) -> RustBuffer {
 
 
 /**
+ * Everything the renderer needs to fit a tree to one physical panel.
+ *
+ * Sourced from `device-registry/glasses-models.json` so the numbers live in
+ * one place rather than being re-typed per consumer.
+ */
+public struct PanelGeometry {
+    /**
+     * Panel resolution in device px.
+     */
+    public var widthPx: UInt32
+    public var heightPx: UInt32
+    /**
+     * Display units → device px. Meta Ray-Ban Display is 2; Halo is 1.
+     */
+    public var unitScale: UInt32
+    public var shape: PanelShape
+    public var input: PanelInput
+    /**
+     * Smallest text this panel renders readably, in device px. A token that
+     * resolves below this is clamped up by [`text_px`].
+     */
+    public var minTextPx: UInt32
+    public var fidelity: SimulationFidelity
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Panel resolution in device px.
+         */widthPx: UInt32, heightPx: UInt32, 
+        /**
+         * Display units → device px. Meta Ray-Ban Display is 2; Halo is 1.
+         */unitScale: UInt32, shape: PanelShape, input: PanelInput, 
+        /**
+         * Smallest text this panel renders readably, in device px. A token that
+         * resolves below this is clamped up by [`text_px`].
+         */minTextPx: UInt32, fidelity: SimulationFidelity) {
+        self.widthPx = widthPx
+        self.heightPx = heightPx
+        self.unitScale = unitScale
+        self.shape = shape
+        self.input = input
+        self.minTextPx = minTextPx
+        self.fidelity = fidelity
+    }
+}
+
+
+
+extension PanelGeometry: Equatable, Hashable {
+    public static func ==(lhs: PanelGeometry, rhs: PanelGeometry) -> Bool {
+        if lhs.widthPx != rhs.widthPx {
+            return false
+        }
+        if lhs.heightPx != rhs.heightPx {
+            return false
+        }
+        if lhs.unitScale != rhs.unitScale {
+            return false
+        }
+        if lhs.shape != rhs.shape {
+            return false
+        }
+        if lhs.input != rhs.input {
+            return false
+        }
+        if lhs.minTextPx != rhs.minTextPx {
+            return false
+        }
+        if lhs.fidelity != rhs.fidelity {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(widthPx)
+        hasher.combine(heightPx)
+        hasher.combine(unitScale)
+        hasher.combine(shape)
+        hasher.combine(input)
+        hasher.combine(minTextPx)
+        hasher.combine(fidelity)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePanelGeometry: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PanelGeometry {
+        return
+            try PanelGeometry(
+                widthPx: FfiConverterUInt32.read(from: &buf), 
+                heightPx: FfiConverterUInt32.read(from: &buf), 
+                unitScale: FfiConverterUInt32.read(from: &buf), 
+                shape: FfiConverterTypePanelShape.read(from: &buf), 
+                input: FfiConverterTypePanelInput.read(from: &buf), 
+                minTextPx: FfiConverterUInt32.read(from: &buf), 
+                fidelity: FfiConverterTypeSimulationFidelity.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PanelGeometry, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.widthPx, into: &buf)
+        FfiConverterUInt32.write(value.heightPx, into: &buf)
+        FfiConverterUInt32.write(value.unitScale, into: &buf)
+        FfiConverterTypePanelShape.write(value.shape, into: &buf)
+        FfiConverterTypePanelInput.write(value.input, into: &buf)
+        FfiConverterUInt32.write(value.minTextPx, into: &buf)
+        FfiConverterTypeSimulationFidelity.write(value.fidelity, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePanelGeometry_lift(_ buf: RustBuffer) throws -> PanelGeometry {
+    return try FfiConverterTypePanelGeometry.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePanelGeometry_lower(_ value: PanelGeometry) -> RustBuffer {
+    return FfiConverterTypePanelGeometry.lower(value)
+}
+
+
+/**
  * A captured still photo. `exif` crosses the FFI as an opaque serialised JSON
  * `String` (the migration-wide JSON policy); each shell parses it natively.
  */
@@ -9030,8 +9196,26 @@ public enum ActiveState {
          * a capture self-arms the session on demand.
          */camera: CameraStatus
     )
+    /**
+     * **Never emitted.** Reserved shape from the original model, kept only
+     * because removing a uniffi variant renumbers the rest and breaks every
+     * consumer's exhaustive match. Do not write code that waits for it.
+     */
     case sessionActive(device: DeviceInfo, session: SessionPhase
     )
+    /**
+     * **Never emitted** — see [`CameraStreamState`], which supersedes it.
+     *
+     * This variant is why the activity axis went missing for so long: it
+     * looked like the model already had a home for "a stream is running", so
+     * nothing else was built, but it was never populated because the shape is
+     * wrong. Activity is per-capability (audio has the same lifecycle), so
+     * expressing it as a CONNECTION sub-state would make `ActiveState` the
+     * product of every capability's lifecycle. Worse, `camera: CameraStatus`
+     * lives only on `Connected`, so emitting this would drop camera health
+     * exactly while a stream runs. Activity now lives on the capability
+     * client — `CameraClient.streamState()`. Removal is a 3.0 item.
+     */
     case streamActive(device: DeviceInfo, stream: StreamConfig
     )
 }
@@ -10320,6 +10504,131 @@ public func FfiConverterTypeCameraStatus_lower(_ value: CameraStatus) -> RustBuf
 
 
 extension CameraStatus: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * The camera stream's **activity** — the axis orthogonal to [`CameraStatus`],
+ * which is **health**. The two are deliberately separate types: a latched
+ * capture failure coexists with a live stream (`capture_broken` survives
+ * session recycles), so `Broken` + streaming is a real combination that one
+ * merged enum could not represent. Health answers "will a capture work, and
+ * should the UI prompt the user?"; this answers "is a stream running now?".
+ *
+ * Lives on the capability client (`CameraClient.streamState()`), NOT inside
+ * `GlassesState`. Activity is per-capability — audio has the same shape — so
+ * folding it into the connection state would make `ActiveState` the product
+ * of every capability's lifecycle. That is why `ActiveState::StreamActive`
+ * was never emitted: the shape was wrong. (EgoFlow feedback 2026-08-03.)
+ *
+ * Normalized from the transport's richer internal `StreamState` vocabulary:
+ * `Starting`/`Started` collapse to `Arming`, `Stopped`/`Closed` to `Idle`
+ * (a `Closed` additionally surfaces as a transport error, unchanged).
+ */
+
+public enum CameraStreamState {
+    
+    /**
+     * No stream is armed. The next capture opens one cold.
+     */
+    case idle
+    /**
+     * A stream is arming — frames have not started flowing yet.
+     */
+    case arming
+    /**
+     * Frames are flowing. `CameraClient.activeStreamInfo()` reports the
+     * effective resolution/frameRate the stream locked at on first arm.
+     */
+    case streaming
+    /**
+     * SYSTEM-driven pause (DAT 0.8 `pauseStreamFromLowerLayer`): another app
+     * took the device session, the wearer folded the glasses, or a system
+     * gesture opened another experience. The channel is HELD but no frames
+     * flow, and DAT 0.8 exposes no app-callable resume. The link is still up,
+     * so this is NOT a disconnect — an app relaying frames onward (an RTMP
+     * push, a recording) should read it as "frames stopped, connection fine"
+     * rather than tearing down.
+     */
+    case paused
+    /**
+     * The stream is winding down; frames have stopped.
+     */
+    case stopping
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCameraStreamState: FfiConverterRustBuffer {
+    typealias SwiftType = CameraStreamState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CameraStreamState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .idle
+        
+        case 2: return .arming
+        
+        case 3: return .streaming
+        
+        case 4: return .paused
+        
+        case 5: return .stopping
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: CameraStreamState, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .idle:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .arming:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .streaming:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .paused:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .stopping:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCameraStreamState_lift(_ buf: RustBuffer) throws -> CameraStreamState {
+    return try FfiConverterTypeCameraStreamState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCameraStreamState_lower(_ value: CameraStreamState) -> RustBuffer {
+    return FfiConverterTypeCameraStreamState.lower(value)
+}
+
+
+
+extension CameraStreamState: Equatable, Hashable {}
 
 
 
@@ -12459,7 +12768,30 @@ public enum DisplayNode {
          */crossAlign: Alignment, 
         /**
          * Gap between children, in display units.
-         */gap: UInt32, padding: EdgeInsets, background: Background, 
+         */gap: UInt32, 
+        /**
+         * Whether children wrap onto additional lines when they exceed the
+         * main axis. Maps to Meta `flexBox(wrap = …)`.
+         *
+         * Without this a row has nowhere to go: the glasses panel is small
+         * (600×600 on Meta Ray-Ban Display, 450×394 on Android XR) and Meta
+         * states plainly that "horizontal scrolling is not supported", so an
+         * over-wide row is simply clipped. A customer hit exactly that with a
+         * seven-button note row (2026-08-04) and had no way to express the
+         * wrapping their layout needed.
+         *
+         * `#[serde(default)]` keeps trees emitted by older SDKs deserialising:
+         * absent means false, which is the pre-existing behaviour.
+         */wrap: Bool, 
+        /**
+         * What happens when this container's content exceeds the panel.
+         *
+         * `#[serde(default)]` keeps trees from older SDKs deserialising, and
+         * the default is [`Overflow::Auto`] — so an existing tree that used to
+         * clip silently starts scrolling or paging instead. That is a
+         * behaviour change, and the intended one: silently losing the bottom
+         * of a tree was never what any author asked for.
+         */overflow: Overflow, padding: EdgeInsets, background: Background, 
         /**
          * `Some(id)` if the whole container is tappable; the native layer
          * dispatches `id → onClick`.
@@ -12514,7 +12846,7 @@ public struct FfiConverterTypeDisplayNode: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .flexBox(direction: try FfiConverterTypeDirection.read(from: &buf), mainAlign: try FfiConverterTypeAlignment.read(from: &buf), crossAlign: try FfiConverterTypeAlignment.read(from: &buf), gap: try FfiConverterUInt32.read(from: &buf), padding: try FfiConverterTypeEdgeInsets.read(from: &buf), background: try FfiConverterTypeBackground.read(from: &buf), onClick: try FfiConverterOptionString.read(from: &buf), children: try FfiConverterSequenceTypeDisplayNode.read(from: &buf)
+        case 1: return .flexBox(direction: try FfiConverterTypeDirection.read(from: &buf), mainAlign: try FfiConverterTypeAlignment.read(from: &buf), crossAlign: try FfiConverterTypeAlignment.read(from: &buf), gap: try FfiConverterUInt32.read(from: &buf), wrap: try FfiConverterBool.read(from: &buf), overflow: try FfiConverterTypeOverflow.read(from: &buf), padding: try FfiConverterTypeEdgeInsets.read(from: &buf), background: try FfiConverterTypeBackground.read(from: &buf), onClick: try FfiConverterOptionString.read(from: &buf), children: try FfiConverterSequenceTypeDisplayNode.read(from: &buf)
         )
         
         case 2: return .text(text: try FfiConverterString.read(from: &buf), style: try FfiConverterTypeTextStyle.read(from: &buf), color: try FfiConverterTypeTextColor.read(from: &buf), align: try FfiConverterTypeAlignment.read(from: &buf)
@@ -12540,12 +12872,14 @@ public struct FfiConverterTypeDisplayNode: FfiConverterRustBuffer {
         switch value {
         
         
-        case let .flexBox(direction,mainAlign,crossAlign,gap,padding,background,onClick,children):
+        case let .flexBox(direction,mainAlign,crossAlign,gap,wrap,overflow,padding,background,onClick,children):
             writeInt(&buf, Int32(1))
             FfiConverterTypeDirection.write(direction, into: &buf)
             FfiConverterTypeAlignment.write(mainAlign, into: &buf)
             FfiConverterTypeAlignment.write(crossAlign, into: &buf)
             FfiConverterUInt32.write(gap, into: &buf)
+            FfiConverterBool.write(wrap, into: &buf)
+            FfiConverterTypeOverflow.write(overflow, into: &buf)
             FfiConverterTypeEdgeInsets.write(padding, into: &buf)
             FfiConverterTypeBackground.write(background, into: &buf)
             FfiConverterOptionString.write(onClick, into: &buf)
@@ -12785,6 +13119,84 @@ public func FfiConverterTypeEarconSound_lower(_ value: EarconSound) -> RustBuffe
 
 
 extension EarconSound: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What a device will actually do, once [`Overflow::Auto`] has been answered.
+ *
+ * There is no `Auto` here on purpose: `Auto` is a question, and this is the
+ * answer. A renderer that still had to handle `Auto` would be re-deciding, and
+ * three renderers re-deciding is three chances to decide differently.
+ */
+
+public enum EffectiveOverflow {
+    
+    case scroll
+    case paginate
+    case clip
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEffectiveOverflow: FfiConverterRustBuffer {
+    typealias SwiftType = EffectiveOverflow
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EffectiveOverflow {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .scroll
+        
+        case 2: return .paginate
+        
+        case 3: return .clip
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: EffectiveOverflow, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .scroll:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .paginate:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .clip:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEffectiveOverflow_lift(_ buf: RustBuffer) throws -> EffectiveOverflow {
+    return try FfiConverterTypeEffectiveOverflow.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEffectiveOverflow_lower(_ value: EffectiveOverflow) -> RustBuffer {
+    return FfiConverterTypeEffectiveOverflow.lower(value)
+}
+
+
+
+extension EffectiveOverflow: Equatable, Hashable {}
 
 
 
@@ -14056,6 +14468,193 @@ public func FfiConverterTypeLinkState_lower(_ value: LinkState) -> RustBuffer {
 
 
 extension LinkState: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What a container does when its content does not fit the panel.
+ *
+ * The default, [`Overflow::Auto`], is the whole point: an app states that
+ * content may exceed the panel and lets each device answer in the way it
+ * physically can. Meta scrolls (its own view host already does), Android XR
+ * uses Glimmer's lazy list, and Brilliant pages — because a canvas driven by
+ * one button cannot scroll at all. Asking the author to pick between those is
+ * asking them to know the hardware; asking them to cap their list at N rows
+ * guarantees a wrong N on some panel.
+ *
+ * The explicit variants exist for the rare case someone must insist. `Clip` is
+ * the only one that can silently lose content, so it is the only one that
+ * warrants a layout warning.
+ */
+
+public enum Overflow {
+    
+    /**
+     * Scroll where the device scrolls, page where it cannot, never lose content.
+     */
+    case auto
+    /**
+     * Insist on scrolling. Falls back to `Paginate` where unsupported.
+     */
+    case scroll
+    /**
+     * Insist on paging, even where scrolling is available.
+     */
+    case paginate
+    /**
+     * Render what fits and drop the rest. The only lossy policy.
+     */
+    case clip
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOverflow: FfiConverterRustBuffer {
+    typealias SwiftType = Overflow
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Overflow {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .auto
+        
+        case 2: return .scroll
+        
+        case 3: return .paginate
+        
+        case 4: return .clip
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: Overflow, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .auto:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .scroll:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .paginate:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .clip:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOverflow_lift(_ buf: RustBuffer) throws -> Overflow {
+    return try FfiConverterTypeOverflow.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOverflow_lower(_ value: Overflow) -> RustBuffer {
+    return FfiConverterTypeOverflow.lower(value)
+}
+
+
+
+extension Overflow: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * How the wearer selects and travels. This is the axis that makes a single
+ * overflow answer impossible: a one-button device genuinely cannot scroll.
+ */
+
+public enum PanelInput {
+    
+    case neuralBand
+    case templeTouchpad
+    case singleButton
+    case headTap
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePanelInput: FfiConverterRustBuffer {
+    typealias SwiftType = PanelInput
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PanelInput {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .neuralBand
+        
+        case 2: return .templeTouchpad
+        
+        case 3: return .singleButton
+        
+        case 4: return .headTap
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PanelInput, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .neuralBand:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .templeTouchpad:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .singleButton:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .headTap:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePanelInput_lift(_ buf: RustBuffer) throws -> PanelInput {
+    return try FfiConverterTypePanelInput.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePanelInput_lower(_ value: PanelInput) -> RustBuffer {
+    return FfiConverterTypePanelInput.lower(value)
+}
+
+
+
+extension PanelInput: Equatable, Hashable {}
 
 
 
@@ -15367,6 +15966,94 @@ extension SessionPhase: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * How much we actually know about a panel's numbers.
+ *
+ * Every device used to be presented with equal authority, which let the
+ * simulator quote Brilliant's pixel counts to three digits when the underlying
+ * font metrics are a guess. Precision reads as confidence; this says out loud
+ * which numbers earned it.
+ */
+
+public enum SimulationFidelity {
+    
+    /**
+     * Geometry and rendering confirmed against real hardware.
+     */
+    case measured
+    /**
+     * The translation runs and renders, but not on shipping hardware.
+     */
+    case translated
+    /**
+     * Geometry from vendor documentation; key values unmeasured.
+     */
+    case derived
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSimulationFidelity: FfiConverterRustBuffer {
+    typealias SwiftType = SimulationFidelity
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SimulationFidelity {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .measured
+        
+        case 2: return .translated
+        
+        case 3: return .derived
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SimulationFidelity, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .measured:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .translated:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .derived:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSimulationFidelity_lift(_ buf: RustBuffer) throws -> SimulationFidelity {
+    return try FfiConverterTypeSimulationFidelity.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSimulationFidelity_lower(_ value: SimulationFidelity) -> RustBuffer {
+    return FfiConverterTypeSimulationFidelity.lower(value)
+}
+
+
+
+extension SimulationFidelity: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * BrowserSim-only UI guidance the connection page renders (`null` = clear).
  * `MeterExhausted` is dropped (decision 5 — it was iOS-only and never emitted).
  */
@@ -15495,6 +16182,96 @@ public func FfiConverterTypeSimulatorHint_lower(_ value: SimulatorHint) -> RustB
 
 
 extension SimulatorHint: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * How much room the panel gives an author, as a coarse bucket.
+ *
+ * The bucket exists so per-panel polish does not have to name a vendor. An app
+ * that branches on [`SizeClass`] keeps working when a device nobody has heard
+ * of arrives, because the new device lands in an existing bucket. An app that
+ * branches on device *identity* cannot, because it has never heard of the new
+ * device. That is the whole difference between an abstraction and an escape
+ * hatch, and both have their place — this is the abstraction.
+ */
+
+public enum SizeClass {
+    
+    /**
+     * Meta Ray-Ban Display class. A short list fits comfortably.
+     */
+    case standard
+    /**
+     * Android XR class. A short list fits; a long one needs travel.
+     */
+    case compact
+    /**
+     * Brilliant Halo class. Assume one idea per view.
+     */
+    case minimal
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSizeClass: FfiConverterRustBuffer {
+    typealias SwiftType = SizeClass
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SizeClass {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .standard
+        
+        case 2: return .compact
+        
+        case 3: return .minimal
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SizeClass, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .standard:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .compact:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .minimal:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSizeClass_lift(_ buf: RustBuffer) throws -> SizeClass {
+    return try FfiConverterTypeSizeClass.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSizeClass_lower(_ value: SizeClass) -> RustBuffer {
+    return FfiConverterTypeSizeClass.lower(value)
+}
+
+
+
+extension SizeClass: Equatable, Hashable {}
 
 
 
@@ -16556,6 +17333,18 @@ public enum TransportEvent {
      */
     case transcriptEmitted(source: TranscriptSource, isFinal: Bool, textLength: Int32, confidence: Double?, durationMs: Int64
     )
+    /**
+     * The camera stream's activity phase changed. Emitted ONLY on a real
+     * change, so a consumer can treat every emission as a transition. The
+     * event stream carries no replay — seed a subscriber with
+     * `GlassesTransport.cameraStreamState()` before collecting.
+     *
+     * Appended deliberately: uniffi indexes variants by position, so adding
+     * this in the middle would renumber `TranscriptEmitted` and let a stale
+     * `.so` decode fresh bindings into the wrong variant, silently.
+     */
+    case cameraStreamStateChanged(state: CameraStreamState
+    )
 }
 
 
@@ -16582,6 +17371,9 @@ public struct FfiConverterTypeTransportEvent: FfiConverterRustBuffer {
         )
         
         case 5: return .transcriptEmitted(source: try FfiConverterTypeTranscriptSource.read(from: &buf), isFinal: try FfiConverterBool.read(from: &buf), textLength: try FfiConverterInt32.read(from: &buf), confidence: try FfiConverterOptionDouble.read(from: &buf), durationMs: try FfiConverterInt64.read(from: &buf)
+        )
+        
+        case 6: return .cameraStreamStateChanged(state: try FfiConverterTypeCameraStreamState.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -16619,6 +17411,11 @@ public struct FfiConverterTypeTransportEvent: FfiConverterRustBuffer {
             FfiConverterInt32.write(textLength, into: &buf)
             FfiConverterOptionDouble.write(confidence, into: &buf)
             FfiConverterInt64.write(durationMs, into: &buf)
+            
+        
+        case let .cameraStreamStateChanged(state):
+            writeInt(&buf, Int32(6))
+            FfiConverterTypeCameraStreamState.write(state, into: &buf)
             
         }
     }
@@ -20139,6 +20936,30 @@ fileprivate struct FfiConverterOptionTypePageTypographyTokens: FfiConverterRustB
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypePanelGeometry: FfiConverterRustBuffer {
+    typealias SwiftType = PanelGeometry?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypePanelGeometry.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypePanelGeometry.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeSoundPcm: FfiConverterRustBuffer {
     typealias SwiftType = SoundPcm?
 
@@ -20836,6 +21657,22 @@ public func autoModelId() -> String {
 })
 }
 /**
+ * The registry model id for a connected Brilliant device — the key that reaches
+ * `panel_for_device`, the backend's capability profile, and the simulator's
+ * device picker.
+ *
+ * Here rather than in each shell because Kotlin had this mapping and Swift did
+ * not, which is the asymmetry that produces "works on Android" bugs. Two string
+ * literals are cheap to duplicate and expensive to keep in step.
+ */
+public func brilliantModelId(device: BrilliantDevice) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_brilliant_model_id(
+        FfiConverterTypeBrilliantDevice.lower(device),$0
+    )
+})
+}
+/**
  * Icon token (both shells map tokens → their icon sets).
  */
 public func capabilityIconToken(kind: DeclaredCapability) -> String {
@@ -20958,6 +21795,21 @@ public func cleanFirmware(raw: String?) -> String? {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_clean_firmware(
         FfiConverterOptionString.lower(raw),$0
+    )
+})
+}
+/**
+ * Cut a tree down to what fits, dropping the rest — [`Overflow::Clip`].
+ *
+ * One page, no page button, no way to reach what was dropped. That is the
+ * contract: `Clip` is the only policy allowed to lose content, and it applies
+ * only because an author named it.
+ */
+public func clipDisplayTree(root: DisplayNode, panel: PanelGeometry) -> DisplayNode {
+    return try!  FfiConverterTypeDisplayNode.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_clip_display_tree(
+        FfiConverterTypeDisplayNode.lower(root),
+        FfiConverterTypePanelGeometry.lower(panel),$0
     )
 })
 }
@@ -21199,6 +22051,21 @@ public func endpointHost(channel: EndpointChannel, env: ExtentosEnvironment) -> 
     uniffi_extentos_core_fn_func_endpoint_host(
         FfiConverterTypeEndpointChannel.lower(channel),
         FfiConverterTypeExtentosEnvironment.lower(env),$0
+    )
+})
+}
+/**
+ * Estimated height of a whole tree on a panel, in device px.
+ *
+ * The number behind "this does not fit". Exported because the simulator reports
+ * it and the Brilliant translation pages on it, and those two must not each
+ * invent their own.
+ */
+public func estimateTreeHeightPx(root: DisplayNode, panel: PanelGeometry) -> UInt32 {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_estimate_tree_height_px(
+        FfiConverterTypeDisplayNode.lower(root),
+        FfiConverterTypePanelGeometry.lower(panel),$0
     )
 })
 }
@@ -21475,6 +22342,63 @@ public func normalizeDisplayRoot(nodes: [DisplayNode]) -> NormalizedRoot {
 })
 }
 /**
+ * See [`PAGE_NAV_ID`]. Exported as a function because uniffi does not carry
+ * constants across the FFI.
+ */
+public func pageNavId() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_page_nav_id($0
+    )
+})
+}
+/**
+ * Split a tree into pages that each fit the panel.
+ *
+ * Splits at the ROOT container's direct children and nowhere deeper. Deeper
+ * nesting is the author's grouping — a card, a labelled row — and breaking
+ * inside one would tear apart something they deliberately put together. A list
+ * of eight notes pages cleanly; a card whose title lands on page 2 without its
+ * body does not.
+ *
+ * When there is more than one page, each page gains a trailing button carrying
+ * [`PAGE_NAV_ID`] and the room for it is reserved before splitting. Page travel
+ * rides the SELECT action every device already has, rather than a new gesture:
+ * the wearer's existing select, the sim's click, and `injectInput` all reach it
+ * unchanged, and the wearer can SEE that there is more — which a scroll region
+ * on a panel with no scrollbar cannot show them.
+ *
+ * Guarantees, in order of how much they matter:
+ *
+ * * No authored content is dropped. Every child appears on exactly one page,
+ * including a child too tall for any page — it gets a page to itself rather
+ * than being skipped, because a page that overflows is visible and a missing
+ * note is not.
+ * * A tree that already fits comes back as exactly one page, unchanged and
+ * with no button added, so calling this unconditionally costs nothing.
+ * * A non-container root is one page. There is nothing to split.
+ */
+public func paginateDisplayTree(root: DisplayNode, panel: PanelGeometry) -> [DisplayNode] {
+    return try!  FfiConverterSequenceTypeDisplayNode.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_paginate_display_tree(
+        FfiConverterTypeDisplayNode.lower(root),
+        FfiConverterTypePanelGeometry.lower(panel),$0
+    )
+})
+}
+/**
+ * The panel for a device model id, or `None` for a device with no screen
+ * (and for an id this build has never heard of — a newer backend can name a
+ * device an older SDK does not know, and guessing a panel would be worse
+ * than declining to lay out for it).
+ */
+public func panelForDevice(modelId: String) -> PanelGeometry? {
+    return try!  FfiConverterOptionTypePanelGeometry.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_panel_for_device(
+        FfiConverterString.lower(modelId),$0
+    )
+})
+}
+/**
  * Parse a config document (the committed asset or the managed server
  * value). None = unparseable JSON (the shell logs + falls back to the
  * base). Unknown keys are ignored; schemaVersion is best-effort, never
@@ -21592,6 +22516,23 @@ public func resolveCapabilityTiles(footprint: [DeclaredCapability], device: Devi
         FfiConverterSequenceTypeDeclaredCapability.lower(footprint),
         FfiConverterTypeDeviceCapabilitySet.lower(device),
         FfiConverterBool.lower(connected),$0
+    )
+})
+}
+/**
+ * Resolve an author's policy against one panel. The single place `Auto` becomes
+ * a concrete behaviour.
+ *
+ * `Scroll` degrades to `Paginate` rather than to `Clip` where scrolling is
+ * impossible: the author asked to keep the content reachable, and paging keeps
+ * it reachable. Only [`Overflow::Clip`] discards, and only because it was asked
+ * for by name.
+ */
+public func resolveOverflow(policy: Overflow, panel: PanelGeometry) -> EffectiveOverflow {
+    return try!  FfiConverterTypeEffectiveOverflow.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_resolve_overflow(
+        FfiConverterTypeOverflow.lower(policy),
+        FfiConverterTypePanelGeometry.lower(panel),$0
     )
 })
 }
@@ -21809,6 +22750,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_auto_model_id() != 23039) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_brilliant_model_id() != 34830) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_capability_icon_token() != 25581) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -21837,6 +22781,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_clean_firmware() != 18169) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_clip_display_tree() != 36155) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_compaction_default_model() != 6880) {
@@ -21897,6 +22844,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_endpoint_host() != 39457) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_estimate_tree_height_px() != 46050) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_gateway_auth_headers() != 17143) {
@@ -21962,6 +22912,15 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_normalize_display_root() != 59593) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_page_nav_id() != 37531) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_paginate_display_tree() != 35552) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_panel_for_device() != 34569) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_parse_connection_page_config() != 18801) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -21984,6 +22943,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_resolve_capability_tiles() != 44871) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_resolve_overflow() != 9708) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_resolve_speak_route() != 59354) {
@@ -22059,6 +23021,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_abort_capture_video() != 30615) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_browsersimcore_camera_stream_state() != 55816) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_browsersimcore_cancel_speak() != 2545) {
@@ -22176,6 +23141,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realmetacore_abort_capture_video() != 29410) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_realmetacore_camera_stream_state() != 46451) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realmetacore_cancel_speak() != 5501) {

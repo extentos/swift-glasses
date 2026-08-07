@@ -20,7 +20,12 @@ final class DefaultConnectionClient: ConnectionClient, @unchecked Sendable {
                     stateRef.set(next)
                 case .simulatorHintChanged(let hint):
                     simulatorHintRef.set(hint)
-                case .hardwareAlertEvent, .errorEvent, .transcriptEmitted:
+                // Camera activity is deliberately NOT folded into connection
+                // state — it is surfaced on the client that owns the
+                // capability (`camera.streamState()`), and the transport fans
+                // it out separately. Ignored here on purpose, not by omission.
+                case .hardwareAlertEvent, .errorEvent, .transcriptEmitted,
+                     .cameraStreamStateChanged:
                     break
                 }
             }

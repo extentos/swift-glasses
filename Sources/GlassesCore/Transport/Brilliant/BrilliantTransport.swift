@@ -48,6 +48,17 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
     /// its own — it has no swipe — so the first interactive node holds it.
     private var focusedId: String?
 
+    // Every interactive id in the shown tree, source order, from the core's
+    // vendor-neutral `interactiveIds`. Focus USED to be pinned to the first one
+    // and never moved, so the wearer could reach exactly one element per screen
+    // — including never reaching the page button the overflow policy appends.
+    private var focusableIds: [String] = []
+
+    // The tree currently on the glasses, kept so a focus move can REPAINT it.
+    // The core draws the ring around the focused id, so moving focus without
+    // re-rendering only changes an invisible variable.
+    private var shownRoot: DisplayNode?
+
     /// Live `audioChunks()` readers.
     private var chunkSinks: [UUID: AsyncStream<AudioChunk>.Continuation] = [:]
 
@@ -116,22 +127,44 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
             transport?.deliverMicChunk(pcm)
         }
 
-        // Both of Brilliant's inputs land on the focused element. Halo's button
-        // could carry more (single/double/long are three distinct events, and
-        // the four display actions do not all have a gesture), but mapping the
-        // extra ones is a decision to make with hardware in hand.
+        // Halo emits FOUR distinct raw events — button single / double / long,
+        // plus the IMU tap — and the display has four actions. The arity makes
+        // the mapping, so there is nothing to guess:
+        //
+        //   single → focus next     double → select
+        //   long   → back           tap    → focus prev
+        //
+        // Previously single, double and tap all did the same thing (select) and
+        // focus never moved, so only the first element on a screen was ever
+        // reachable. FRAME has no button at all: its tap selects, and focus
+        // travel comes from the orientation stream instead.
         func onTap() {
-            transport?.select()
+            if transport?.core.device() == .frame {
+                transport?.select()
+            } else {
+                transport?.moveFocus(forward: false)
+            }
         }
 
         func onClick(kind: ClickAction) {
             switch kind {
-            case .single, .double: transport?.select()
+            case .single: transport?.moveFocus(forward: true)
+            case .double: transport?.select()
             case .long: transport?.back()
             }
         }
 
+        // Raw head pose, for an app that wants it. The focus DECISION is not
+        // made here — the core turns the stream into discrete steps and calls
+        // onFocusStep, so both platforms behave identically.
         func onImu(data: Data) {}
+
+        // Frame's only way to move focus: it has no button, so orientation is
+        // what its tap cannot do. Arrives already debounced and hysteresis-
+        // filtered by the core, so this is a plain focus move.
+        func onFocusStep(step: FocusStep) {
+            transport?.moveFocus(forward: step == .next)
+        }
 
         func onDeviceLog(line: String) {
             // Lua errors arrive here and nowhere else; losing them would make
@@ -204,9 +237,16 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
         // that repeated any of it would be a second place for the layout to
         // drift from Android.
         do {
-            let rendered = try core.showDisplay(root: root)
+            let rendered = try core.showDisplay(root: root, focusedId: nil)
             lock.lock()
+            shownRoot = root
+            focusableIds = interactiveIds(root: root)
             focusedId = rendered.firstInteractiveId
+            // Paint the ring on the element the first gesture will act on.
+            // Without this the wearer cannot tell what a press would do.
+            if let first = focusedId {
+                _ = try? core.showDisplay(root: root, focusedId: first)
+            }
             lock.unlock()
 
             // Say what could not be drawn rather than leaving a developer to
@@ -528,6 +568,17 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
         lock.unlock()
         guard shouldStop else { return }
         do { try core.stopMicrophone() } catch { bridgeLog("microphone: \(error)") }
+    }
+
+    /// Move focus and repaint, so the wearer SEES the focus ring move.
+    ///
+    /// Uses the core's `stepFocus`, which wraps — Halo has no backward gesture
+    /// on its button, so a list that stopped at the end would strand the wearer.
+    fileprivate func moveFocus(forward: Bool) {
+        guard let next = stepFocus(ids: focusableIds, current: focusedId, forward: forward),
+              let tree = shownRoot else { return }
+        focusedId = next
+        _ = try? core.showDisplay(root: tree, focusedId: next)
     }
 
     private func select() {

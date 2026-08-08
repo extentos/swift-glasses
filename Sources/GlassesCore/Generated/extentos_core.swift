@@ -698,8 +698,13 @@ public protocol BrilliantCoreProtocol : AnyObject {
      * Returns what was drawn and what could not be, so the caller can tell a
      * developer why their heading looks like body text or where their bottom
      * row went.
+     *
+     * `focused_id` is the node the focus ring is painted around. It used to be
+     * hardcoded `None`, so no Brilliant device ever drew a focus ring — which
+     * made focus travel invisible even once the transport could move it.
+     * Re-calling this with the same tree and a new id IS the repaint.
      */
-    func showDisplay(root: DisplayNode) throws  -> Rendered
+    func showDisplay(root: DisplayNode, focusedId: String?) throws  -> Rendered
     
     /**
      * Start streaming microphone audio from the glasses.
@@ -920,11 +925,17 @@ open func sendMessage(code: UInt8, payload: Data)throws  {try rustCallWithError(
      * Returns what was drawn and what could not be, so the caller can tell a
      * developer why their heading looks like body text or where their bottom
      * row went.
+     *
+     * `focused_id` is the node the focus ring is painted around. It used to be
+     * hardcoded `None`, so no Brilliant device ever drew a focus ring — which
+     * made focus travel invisible even once the transport could move it.
+     * Re-calling this with the same tree and a new id IS the repaint.
      */
-open func showDisplay(root: DisplayNode)throws  -> Rendered {
+open func showDisplay(root: DisplayNode, focusedId: String?)throws  -> Rendered {
     return try  FfiConverterTypeRendered.lift(try rustCallWithError(FfiConverterTypeBrilliantError.lift) {
     uniffi_extentos_core_fn_method_brilliantcore_show_display(self.uniffiClonePointer(),
-        FfiConverterTypeDisplayNode.lower(root),$0
+        FfiConverterTypeDisplayNode.lower(root),
+        FfiConverterOptionString.lower(focusedId),$0
     )
 })
 }
@@ -2485,6 +2496,170 @@ public func FfiConverterTypeInterruptionClassifier_lift(_ pointer: UnsafeMutable
 #endif
 public func FfiConverterTypeInterruptionClassifier_lower(_ value: InterruptionClassifier) -> UnsafeMutableRawPointer {
     return FfiConverterTypeInterruptionClassifier.lower(value)
+}
+
+
+
+
+/**
+ * Turns a stream of head orientations into discrete focus steps.
+ */
+public protocol OrientationFocusProtocol : AnyObject {
+    
+    /**
+     * Feed one sample; get a step when the wearer has just crossed out of
+     * neutral, and `None` otherwise.
+     *
+     * Tilting the head FORWARD (nose down, negative pitch) reads as moving
+     * down a list, the same direction the eyes travel. Back is previous.
+     */
+    func onSample(orientation: Orientation)  -> FocusStep?
+    
+    /**
+     * Adopt the next sample as the neutral posture. Called when a view is
+     * shown, so "level" means where this wearer's head actually is.
+     */
+    func recentre() 
+    
+}
+
+/**
+ * Turns a stream of head orientations into discrete focus steps.
+ */
+open class OrientationFocus:
+    OrientationFocusProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_extentos_core_fn_clone_orientationfocus(self.pointer, $0) }
+    }
+public convenience init() {
+    let pointer =
+        try! rustCall() {
+    uniffi_extentos_core_fn_constructor_orientationfocus_new($0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_extentos_core_fn_free_orientationfocus(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Feed one sample; get a step when the wearer has just crossed out of
+     * neutral, and `None` otherwise.
+     *
+     * Tilting the head FORWARD (nose down, negative pitch) reads as moving
+     * down a list, the same direction the eyes travel. Back is previous.
+     */
+open func onSample(orientation: Orientation) -> FocusStep? {
+    return try!  FfiConverterOptionTypeFocusStep.lift(try! rustCall() {
+    uniffi_extentos_core_fn_method_orientationfocus_on_sample(self.uniffiClonePointer(),
+        FfiConverterTypeOrientation.lower(orientation),$0
+    )
+})
+}
+    
+    /**
+     * Adopt the next sample as the neutral posture. Called when a view is
+     * shown, so "level" means where this wearer's head actually is.
+     */
+open func recentre() {try! rustCall() {
+    uniffi_extentos_core_fn_method_orientationfocus_recentre(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOrientationFocus: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = OrientationFocus
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> OrientationFocus {
+        return OrientationFocus(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: OrientationFocus) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OrientationFocus {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: OrientationFocus, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOrientationFocus_lift(_ pointer: UnsafeMutableRawPointer) throws -> OrientationFocus {
+    return try FfiConverterTypeOrientationFocus.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOrientationFocus_lower(_ value: OrientationFocus) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeOrientationFocus.lower(value)
 }
 
 
@@ -7070,6 +7245,88 @@ public func FfiConverterTypeOpenStreamConfig_lift(_ buf: RustBuffer) throws -> O
 #endif
 public func FfiConverterTypeOpenStreamConfig_lower(_ value: OpenStreamConfig) -> RustBuffer {
     return FfiConverterTypeOpenStreamConfig.lower(value)
+}
+
+
+/**
+ * Head orientation as Frame reports it, in degrees.
+ *
+ * Mirrors the table `frame.imu.direction()` returns. `heading` is carried for
+ * completeness and deliberately unused here: yaw drifts as a wearer turns to
+ * look at things, so navigating on it would move focus while someone simply
+ * looked around.
+ */
+public struct Orientation {
+    public var roll: Float
+    public var pitch: Float
+    public var heading: Float
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(roll: Float, pitch: Float, heading: Float) {
+        self.roll = roll
+        self.pitch = pitch
+        self.heading = heading
+    }
+}
+
+
+
+extension Orientation: Equatable, Hashable {
+    public static func ==(lhs: Orientation, rhs: Orientation) -> Bool {
+        if lhs.roll != rhs.roll {
+            return false
+        }
+        if lhs.pitch != rhs.pitch {
+            return false
+        }
+        if lhs.heading != rhs.heading {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(roll)
+        hasher.combine(pitch)
+        hasher.combine(heading)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOrientation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Orientation {
+        return
+            try Orientation(
+                roll: FfiConverterFloat.read(from: &buf), 
+                pitch: FfiConverterFloat.read(from: &buf), 
+                heading: FfiConverterFloat.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Orientation, into buf: inout [UInt8]) {
+        FfiConverterFloat.write(value.roll, into: &buf)
+        FfiConverterFloat.write(value.pitch, into: &buf)
+        FfiConverterFloat.write(value.heading, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOrientation_lift(_ buf: RustBuffer) throws -> Orientation {
+    return try FfiConverterTypeOrientation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOrientation_lower(_ value: Orientation) -> RustBuffer {
+    return FfiConverterTypeOrientation.lower(value)
 }
 
 
@@ -13650,6 +13907,73 @@ extension ExtentosError: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * Which way focus should move, or nothing.
+ */
+
+public enum FocusStep {
+    
+    case next
+    case previous
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFocusStep: FfiConverterRustBuffer {
+    typealias SwiftType = FocusStep
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FocusStep {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .next
+        
+        case 2: return .previous
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FocusStep, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .next:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .previous:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFocusStep_lift(_ buf: RustBuffer) throws -> FocusStep {
+    return try FfiConverterTypeFocusStep.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFocusStep_lower(_ value: FocusStep) -> RustBuffer {
+    return FfiConverterTypeFocusStep.lower(value)
+}
+
+
+
+extension FocusStep: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * The top-level glasses connection state — the value of
  * `ConnectionClient.state`. A pure uniffi `Enum` now that `ConnectionScope`
  * is gone.
@@ -17968,6 +18292,18 @@ public protocol BrilliantObserver : AnyObject {
     func onImu(data: Data) 
     
     /**
+     * Focus should move one step, decided by the core from the orientation
+     * stream (see [`super::OrientationFocus`]).
+     *
+     * Separate from [`Self::on_imu`] because the raw angles are a stream and
+     * this is a DECISION: a continuous signal becoming discrete steps needs
+     * hysteresis and a per-wearer baseline, and two shells writing that
+     * independently would drift on the numbers. The shell moves focus and
+     * repaints; it does not decide when.
+     */
+    func onFocusStep(step: FocusStep) 
+    
+    /**
      * Lua `print` output — diagnostics, and how the device reports Lua errors.
      *
      * Only delivered once the link is [`LinkState::Ready`]. During the
@@ -18148,6 +18484,30 @@ fileprivate struct UniffiCallbackInterfaceBrilliantObserver {
                 }
                 return uniffiObj.onImu(
                      data: try FfiConverterData.lift(data)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        onFocusStep: { (
+            uniffiHandle: UInt64,
+            step: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrilliantObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onFocusStep(
+                     step: try FfiConverterTypeFocusStep.lift(step)
                 )
             }
 
@@ -20816,6 +21176,30 @@ fileprivate struct FfiConverterOptionTypeHostedAsset: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeOrientation: FfiConverterRustBuffer {
+    typealias SwiftType = Orientation?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeOrientation.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeOrientation.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypePageColorTokens: FfiConverterRustBuffer {
     typealias SwiftType = PageColorTokens?
 
@@ -21072,6 +21456,30 @@ fileprivate struct FfiConverterOptionTypeDeviceSessionError: FfiConverterRustBuf
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeDeviceSessionError.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeFocusStep: FfiConverterRustBuffer {
+    typealias SwiftType = FocusStep?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeFocusStep.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeFocusStep.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -22177,6 +22585,21 @@ public func hostedMediaKey(uri: String) -> String {
 })
 }
 /**
+ * Every interactive node id, depth-first in source order — the order a wearer
+ * reads them, and therefore the order focus should travel.
+ *
+ * Both node kinds that can carry an action are included: a `Button` always
+ * has an id, and a `FlexBox` is interactive when it carries `on_click` (the
+ * tappable-card idiom every list uses).
+ */
+public func interactiveIds(root: DisplayNode) -> [String] {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_interactive_ids(
+        FfiConverterTypeDisplayNode.lower(root),$0
+    )
+})
+}
+/**
  * Kokoro speaker id for a configured voice id, or `None` when the id is not
  * a Kokoro voice (e.g. "system", or a cloud provider's voice).
  */
@@ -22423,6 +22846,21 @@ public func parseHexColor(raw: String) -> UInt32? {
 })
 }
 /**
+ * Decode the `TX_IMU` payload: three big-endian `int16`s in TENTHS of a degree,
+ * as roll, pitch, heading.
+ *
+ * Tenths rather than whole degrees so a slow movement reads as motion rather
+ * than as a staircase, and `int16` because a BLE packet on this link is
+ * precious — six bytes carries the whole orientation.
+ */
+public func parseOrientation(data: Data) -> Orientation? {
+    return try!  FfiConverterOptionTypeOrientation.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_parse_orientation(
+        FfiConverterData.lower(data),$0
+    )
+})
+}
+/**
  * DSP-25: the transient "Preparing video…" surface shown while a clip
  * uploads. Centered bright text — additive-light friendly; the panel can't
  * do a smooth spinner (the declarative tree updates at a few Hz, and the
@@ -22587,6 +23025,27 @@ public func speakPlaybackRemainderMs(audioSeconds: Double, elapsedMs: Int64) -> 
     uniffi_extentos_core_fn_func_speak_playback_remainder_ms(
         FfiConverterDouble.lower(audioSeconds),
         FfiConverterInt64.lower(elapsedMs),$0
+    )
+})
+}
+/**
+ * The id focus moves to from `current`, wrapping at both ends.
+ *
+ * Wrapping rather than stopping is load-bearing on hardware that can only go
+ * one way. Halo's button advances; there is no "back one" gesture, so a list
+ * that stopped at the end would strand the wearer with no way to return to the
+ * top. Wrapping makes a single forward input sufficient to reach everything.
+ *
+ * `None` current starts at the first id going forward, the last going back —
+ * so the very first input after a show lands somewhere sensible either way.
+ * Returns `None` only when there is nothing interactive at all.
+ */
+public func stepFocus(ids: [String], current: String?, forward: Bool) -> String? {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_step_focus(
+        FfiConverterSequenceString.lower(ids),
+        FfiConverterOptionString.lower(current),
+        FfiConverterBool.lower(forward),$0
     )
 })
 }
@@ -22870,6 +23329,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_hosted_media_key() != 20356) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_interactive_ids() != 58771) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_kokoro_speaker_id() != 44395) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -22927,6 +23389,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_parse_hex_color() != 53398) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_parse_orientation() != 47539) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_preparing_video_card() != 18334) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -22955,6 +23420,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_speak_playback_remainder_ms() != 25156) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_step_focus() != 33347) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_toggle_bool_default_true() != 61482) {
@@ -23011,7 +23479,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_brilliantcore_send_message() != 19239) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_brilliantcore_show_display() != 50394) {
+    if (uniffi_extentos_core_checksum_method_brilliantcore_show_display() != 31601) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_brilliantcore_start_microphone() != 862) {
@@ -23138,6 +23606,12 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_interruptionclassifier_classify() != 40206) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_orientationfocus_on_sample() != 21484) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_orientationfocus_recentre() != 38148) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realmetacore_abort_capture_video() != 29410) {
@@ -23389,6 +23863,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_constructor_interruptionclassifier_new() != 22810) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_constructor_orientationfocus_new() != 60651) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_constructor_realmetacore_new() != 39964) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -23440,10 +23917,13 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_brilliantobserver_on_imu() != 57668) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_device_log() != 1225) {
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_focus_step() != 31987) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_handshake_failed() != 3805) {
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_device_log() != 12174) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_brilliantobserver_on_handshake_failed() != 12515) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_clock_now_ms() != 1561) {

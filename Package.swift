@@ -55,8 +55,8 @@ let package = Package(
         // universal arm64/x86_64 simulator slice + macOS arm64).
         .binaryTarget(
             name: "extentos_coreFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/2.2.0/extentos_coreFFI.xcframework.zip",
-            checksum: "38b39fe1897f4ae29b69e8a034b9a66b383743d1aeba5a86799f1e2ac8d48c2e"
+            url: "https://github.com/extentos/swift-glasses/releases/download/2.2.1/extentos_coreFFI.xcframework.zip",
+            checksum: "81b753d678c634f6ca925cc455ca5f0cd523bff38b6e1871b55b386d01dc1593"
         ),
         .target(
             name: "GlassesCore",
@@ -64,6 +64,12 @@ let package = Package(
                 "extentos_coreFFI",
                 .product(name: "MWDATCore", package: "meta-wearables-dat-ios"),
                 .product(name: "MWDATCamera", package: "meta-wearables-dat-ios"),
+                // Must mirror the monorepo manifest's GlassesCore. MetaHardwareBridge
+                // and MetaDisplayTranslation `import MWDATDisplay` unguarded, so a
+                // missing product here does not degrade display — it stops the
+                // published package compiling for iOS at all. The product-parity
+                // gate in stage-swift-glasses.sh now enforces this.
+                .product(name: "MWDATDisplay", package: "meta-wearables-dat-ios"),
             ],
             // uniffi 0.28's generated Swift uses a nonisolated global `var`
             // that Swift 6 strict concurrency rejects; the bindings compile in
@@ -96,13 +102,13 @@ let package = Package(
         // why the voice shipped on Android months before iOS.
         .binaryTarget(
             name: "sherpaOnnxFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/2.2.0/sherpaOnnxFFI.xcframework.zip",
-            checksum: "68dec9fc90d3bc659d3e7a3dcd2eac059057c5d658eda24911f0fd94cd3e41c7"
+            url: "https://github.com/extentos/swift-glasses/releases/download/2.2.1/sherpaOnnxFFI.xcframework.zip",
+            checksum: "658edea59fcc6a960a00bb781bf422e9595a38eafacd67921284f2527406e731"
         ),
         .binaryTarget(
             name: "onnxruntimeFFI",
-            url: "https://github.com/extentos/swift-glasses/releases/download/2.2.0/onnxruntimeFFI.xcframework.zip",
-            checksum: "fdcedd01bc790f1462246bef036fc876102b228359b6879966306cd3bf445f2f"
+            url: "https://github.com/extentos/swift-glasses/releases/download/2.2.1/onnxruntimeFFI.xcframework.zip",
+            checksum: "d58b2fb27803857129e785d13e25268295694450931a64767cc746b030db0be4"
         ),
         .target(
             name: "GlassesLocalVoice",

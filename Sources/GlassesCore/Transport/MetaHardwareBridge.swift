@@ -837,19 +837,53 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
         defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
         let width = CVPixelBufferGetWidth(pb)
         let height = CVPixelBufferGetHeight(pb)
-        var out = Data()
+        // Packing rules live in YuvPacking so they are unit-testable on macOS;
+        // this function only reads CoreVideo's description of the buffer.
+        // Branch on the ACTUAL pixel format, never on plane count - inferring
+        // the layout is how the NV12-vs-I420 bug survived for so long.
         let planeCount = CVPixelBufferGetPlaneCount(pb)
-        if planeCount == 0 {
+        guard planeCount > 0, let yBase = CVPixelBufferGetBaseAddressOfPlane(pb, 0) else {
+            // Non-planar (e.g. 32-bit BGRA): strip row padding and hand it back.
             guard let base = CVPixelBufferGetBaseAddress(pb) else { return nil }
-            let rows = CVPixelBufferGetBytesPerRow(pb) * height
-            out.append(Data(bytes: base, count: rows))
-        } else {
-            for plane in 0..<planeCount {
-                guard let base = CVPixelBufferGetBaseAddressOfPlane(pb, plane) else { return nil }
-                let rows = CVPixelBufferGetBytesPerRowOfPlane(pb, plane) * CVPixelBufferGetHeightOfPlane(pb, plane)
-                out.append(Data(bytes: base, count: rows))
+            let stride = CVPixelBufferGetBytesPerRow(pb)
+            let rowBytes = min(width * 4, stride)
+            var out = Data()
+            out.reserveCapacity(rowBytes * height)
+            for row in 0..<height {
+                out.append(Data(bytes: base.advanced(by: row * stride), count: rowBytes))
             }
+            return (out, width, height)
         }
+        let yStride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0)
+
+        let chroma: YuvPacking.ChromaSource
+        if planeCount >= 3 {
+            guard let uBase = CVPixelBufferGetBaseAddressOfPlane(pb, 1),
+                  let vBase = CVPixelBufferGetBaseAddressOfPlane(pb, 2)
+            else { return nil }
+            chroma = .planar(
+                u: uBase, uStride: CVPixelBufferGetBytesPerRowOfPlane(pb, 1),
+                v: vBase, vStride: CVPixelBufferGetBytesPerRowOfPlane(pb, 2))
+        } else {
+            let format = CVPixelBufferGetPixelFormatType(pb)
+            let isKnownBiplanar =
+                format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                || format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            if !isKnownBiplanar {
+                // Do not guess at an unrecognised layout - a wrong guess is
+                // silent colour corruption, which is exactly what this fix
+                // exists to end.
+                Self.frameLog.error(
+                    "video_frames: unsupported raw pixel format \(format, privacy: .public) - dropping frame")
+                return nil
+            }
+            guard let uvBase = CVPixelBufferGetBaseAddressOfPlane(pb, 1) else { return nil }
+            chroma = .interleaved(
+                uv: uvBase, stride: CVPixelBufferGetBytesPerRowOfPlane(pb, 1))
+        }
+
+        let out = YuvPacking.packToI420(
+            y: yBase, yStride: yStride, chroma: chroma, width: width, height: height)
         return (out, width, height)
     }
 
@@ -1462,6 +1496,7 @@ final class MetaHardwareBridge: HardwareBridge, @unchecked Sendable {
     }
 
     private static let displayLog = Logger(subsystem: "com.extentos.glasses", category: "display")
+    private static let frameLog = Logger(subsystem: "com.extentos.glasses", category: "frames")
     private var displayLog: Logger { Self.displayLog }
 
     // MARK: - Display capability (MWDATDisplay)

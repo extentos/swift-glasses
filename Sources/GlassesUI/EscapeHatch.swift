@@ -122,7 +122,7 @@ enum UiStateBuilder {
                     availability: publicAvailability(tile.state)
                 )
             },
-            toggles: renderToggles(state: toggles),
+            toggles: renderToggles(state: toggles, footprint: footprint),
             voiceHints: voiceHints,
             libraryVersion: LibraryVersion.version
         )
@@ -153,8 +153,10 @@ enum UiStateBuilder {
         }
     }
 
-    private static func renderToggles(state: Toggles) -> [ToggleEntry] {
-        connectionPageToggles().map { def in
+    private static func renderToggles(
+        state: Toggles, footprint: [DeclaredCapability]
+    ) -> [ToggleEntry] {
+        connectionPageToggles(used: footprint).map { def in
             ToggleEntry(
                 id: def.key,
                 label: def.label,

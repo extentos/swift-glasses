@@ -22283,10 +22283,15 @@ public func connectionIndicatorRole(state: GlassesState) -> IndicatorRole {
  * voice_confirmations, battery_save_mode, privacy_mode — see
  * capabilities.ts) still exist in `glasses.toggles.state` for programmatic
  * use but don't render on the default page.
+ * Gated on the app's DECLARED capabilities. A toggle for hardware the app
+ * never asked for is an instruction the user cannot act on: a camera-only
+ * integration was offering "Voice activation" for a microphone it never
+ * opens. Declare nothing and you get nothing, matching the capability tiles.
  */
-public func connectionPageToggles() -> [ToggleDefinition] {
+public func connectionPageToggles(used: [DeclaredCapability]) -> [ToggleDefinition] {
     return try!  FfiConverterSequenceTypeToggleDefinition.lift(try! rustCall() {
-    uniffi_extentos_core_fn_func_connection_page_toggles($0
+    uniffi_extentos_core_fn_func_connection_page_toggles(
+        FfiConverterSequenceTypeDeclaredCapability.lower(used),$0
     )
 })
 }
@@ -23257,7 +23262,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_connection_indicator_role() != 25660) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_func_connection_page_toggles() != 7071) {
+    if (uniffi_extentos_core_checksum_func_connection_page_toggles() != 41674) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_connection_summary() != 38613) {

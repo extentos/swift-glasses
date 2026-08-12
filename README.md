@@ -1,8 +1,10 @@
 # Extentos iOS SDK (`swift-glasses`)
 
 The Swift Package for [Extentos](https://extentos.com) — smart-glasses
-primitives (camera, audio, voice assistant, connection UI, browser simulator)
-for native iOS apps. Meta Ray-Ban glasses are supported in production today.
+primitives for native iOS apps: connection UI, camera capture and raw frames,
+microphone and transcription, speech, a voice assistant runtime, on-glasses
+display, and a browser simulator you can develop against without hardware.
+Meta Ray-Ban glasses are supported in production today.
 
 > **This is a distribution repo.** Source of truth is the Extentos monorepo;
 > the contents here are published by its release pipeline. Please don't open
@@ -10,38 +12,52 @@ for native iOS apps. Meta Ray-Ban glasses are supported in production today.
 
 ## Install
 
-Xcode: *File → Add Package Dependencies…* → `https://github.com/extentos/swift-glasses`
+Xcode: *File → Add Package Dependencies…* → `https://github.com/extentos/swift-glasses`,
+dependency rule **Up to Next Major Version** starting at `2.0.0`.
 
 Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/extentos/swift-glasses", from: "1.7.0"),
+    .package(url: "https://github.com/extentos/swift-glasses", from: "2.2.3"),
 ],
 ```
 
-> **Pre-release tags** (e.g. `1.7.0-rc1`) are excluded from `from:` version
-> ranges by SwiftPM's semver rules — pin them exactly instead:
-> `.package(url: "…/swift-glasses", exact: "1.7.0-rc1")` (xcodegen:
-> `exactVersion: 1.7.0-rc1`). If `from:` reports "no versions matching",
-> check the [releases page](https://github.com/extentos/swift-glasses/releases)
-> for whether the latest tag is a pre-release.
+Then link the products your target uses:
 
-Products: `GlassesCore` (the SDK), `GlassesUI` (drop-in connection page),
-`GlassesDebug` (debug console — debug builds only), `GlassesLifecycle`,
-`GlassesTesting`.
+| Product | What it is |
+|---|---|
+| `GlassesCore` | The SDK — connection, camera, audio, voice, assistant, display, toggles, telemetry |
+| `GlassesUI` | The drop-in SwiftUI connection page (`ExtentosConnectionPage`) and theming |
+| `GlassesLocal` | On-device text models for the local tier. Optional — but its MLX dependency is what sets the package's iOS 17 floor for every product |
+| `GlassesLocalVoice` | On-device speech (Kokoro) for the local tier. Optional |
+| `GlassesDebug` | Scaffolding today — the debug-console API surface is reserved |
+| `GlassesLifecycle` | Scaffolding today — the `extentosListening` scene-phase modifier is a passthrough |
+| `GlassesTesting` | Scaffolding today — stub the protocols yourself for unit tests |
+
+The compiled Rust core (`extentos_coreFFI.xcframework`) is a binary target that SPM
+resolves automatically from the matching GitHub Release by URL and checksum — device
+arm64, a universal arm64/x86_64 simulator slice, and macOS arm64. There is nothing to
+download or verify by hand.
 
 ## Requirements
 
-- iOS 16+, Swift tools 6.0 (the core bindings compile in Swift 5 language mode)
-- Meta Wearables Device Access Toolkit ≥ 0.8.0 (resolved automatically)
-- Per-developer Meta DAT credentials — see the
-  [getting-started guide](https://extentos.com/docs/getting-started/ios)
+| Requirement | Value |
+|---|---|
+| Deployment target | **iOS 17.0+** / macOS 14.0+, whichever products you link. SwiftPM applies a package's platform floor package-wide, so `GlassesLocal`'s MLX dependency raises it for `GlassesCore` too. An iOS 16 target fails to resolve. |
+| Swift toolchain | Swift 6 (`swift-tools-version: 6.0`); `GlassesCore` compiles in Swift 5 language mode |
+| Meta DAT | `meta-wearables-dat-ios` 0.8.x, resolved automatically. The range is deliberately capped below 0.9.0 — a published SDK cannot let a vendor's minor release decide whether it builds. |
+| Meta credentials | Per-developer, not federated — see the [getting-started guide](https://extentos.com/docs/getting-started/ios) |
+
+Other vendors (Brilliant Labs, Android XR) are in preview at varying stages and are
+documented per-vendor at [extentos.com/docs/vendors](https://extentos.com/docs/vendors).
+A Meta-only app inherits nothing from them.
 
 ## Versioning
 
 Versions are in lockstep with the Android SDK (`com.extentos:glasses` on Maven
 Central): the same version number ships the same shared core on both platforms.
+Release notes are on the [releases page](https://github.com/extentos/swift-glasses/releases).
 
 The fastest path to a working integration is agent-driven: install
 `@extentos/mcp-server` in your AI coding agent and let it scaffold the app —

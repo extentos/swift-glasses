@@ -19,7 +19,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/extentos/swift-glasses", from: "2.2.3"),
+    .package(url: "https://github.com/extentos/swift-glasses", from: "2.2.4"),
 ],
 ```
 

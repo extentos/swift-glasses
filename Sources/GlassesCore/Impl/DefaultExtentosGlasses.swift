@@ -189,11 +189,29 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
         self._assistant = DefaultAssistantClient(
             audio: _audio,
             transport: transport,
-            // Gateway bearer: the sim handshake token (dev). The attest-JWT
-            // lane (beta/prod) lands with Phase-F device attestation.
-            // Auth precedence (Android parity): sim token (simulator) ->
-            // baked project key on a non-sim debug build (dogfood on real
-            // glasses, dev-tier Bearer) -> attest JWT (beta/prod; Phase F).
+            // Gateway bearer: the sim session token when simulating, otherwise
+            // the baked project key — in EVERY environment, beta and production
+            // included. This is correct. Do not "fix" it into an attest-JWT
+            // lane; an earlier comment here promised exactly that and it was
+            // rejected on the merits (RDQ 95/96, 2026-08-11).
+            //
+            // Two independent reasons, either one sufficient:
+            //   1. Production could not obtain a JWT. Attestation is an upgrade
+            //      available only where the platform gives it away, and it is
+            //      not wired on iOS (the scaffold emits no App Attest
+            //      entitlement, and app_attest_keys has never registered a
+            //      single key). A JWT bearer here would be nil in production.
+            //   2. Even with a JWT, this client sends NO x-extentos-project-key
+            //      header — DefaultAssistantClient's `.gateway(...)` call omits
+            //      it — so the backend could not attribute the session,
+            //      attest JWTs carry no accountId, and the credit gate would
+            //      refuse it as `billing_unattributed`.
+            //
+            // Android had the "correct-looking" precedence and it left its
+            // production arm resolving to nil, so every app shipped to Play had
+            // a dead assistant until 5bde088b; Android now matches THIS.
+            // Backend view: gateway-auth.ts. If the header is ever added for
+            // attribution parity, it is additive and does not change the bearer.
             gatewayToken: { [weak sim = transport as? BrowserSimTransport] in
                 sim?.simGatewayToken
                     ?? (Bundle.main.infoDictionary?["EXTENTOSProjectKey"] as? String)

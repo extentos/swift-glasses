@@ -43,6 +43,14 @@ public enum Extentos {
             return (
                 BrowserSimTransport(
                     initialSessionUrl: url.absoluteString,
+                    // Announce the device identity even though an explicit URL
+                    // does not need it to CONNECT. The backend uses it to
+                    // recognise a relaunch of the same app as a supersede
+                    // rather than a role conflict; without it, re-running while
+                    // the previous socket is still OPEN is refused, silently.
+                    // Only the pending path passed this before, so every app
+                    // pointed at a session by URL lost that protection.
+                    deviceInstallId: DeviceInstallStore.resolve(),
                     hostAppPackageName: hostAppPackageName
                 ),
                 .browserSim,
@@ -65,6 +73,9 @@ public enum Extentos {
                 return (
                     BrowserSimTransport(
                         initialSessionUrl: url,
+                        // See the .simulated(.browser) case above — the backend
+                        // needs this to tell a relaunch from a second device.
+                        deviceInstallId: DeviceInstallStore.resolve(),
                         hostAppPackageName: hostAppPackageName
                     ),
                     .browserSim,
@@ -75,6 +86,8 @@ public enum Extentos {
                 return (
                     BrowserSimTransport(
                         initialSessionUrl: url,
+                        // See the .simulated(.browser) case above.
+                        deviceInstallId: DeviceInstallStore.resolve(),
                         hostAppPackageName: hostAppPackageName
                     ),
                     .browserSim,

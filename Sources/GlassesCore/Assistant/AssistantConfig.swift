@@ -105,10 +105,6 @@ public struct AssistantConfig: Sendable {
     /// core-owned directive + the user's memory context.
     public let greeting: Greeting
 
-    /// Play the wake-confirmation chime at the start of each wake (fills
-    /// the connect-wait silence). Default true.
-    public let wakeSoundEnabled: Bool
-
     /// Register the built-in `get_device_info` tool (default ON) so the
     /// model can pull device capabilities/state on demand.
     public let includeDeviceInfoTool: Bool
@@ -149,7 +145,6 @@ public struct AssistantConfig: Sendable {
         memoryUserId: String? = nil,
         memoryStore: (any MemoryStore)? = nil,
         greeting: Greeting = .default,
-        wakeSoundEnabled: Bool = true,
         includeDeviceInfoTool: Bool = true,
         deviceInfoNote: String? = nil,
         localConductFloor: Bool = true,
@@ -180,7 +175,6 @@ public struct AssistantConfig: Sendable {
         self.memoryUserId = memoryUserId
         self.memoryStore = memoryStore
         self.greeting = greeting
-        self.wakeSoundEnabled = wakeSoundEnabled
         self.includeDeviceInfoTool = includeDeviceInfoTool
         self.deviceInfoNote = deviceInfoNote
         self.localConductFloor = localConductFloor
@@ -325,9 +319,6 @@ public final class AssistantConfigBuilder: @unchecked Sendable {
     /// Wake greeting. Default: the core directive + memory context.
     public var greeting: Greeting = .default
 
-    /// Wake-confirmation chime on each wake.
-    public var wakeSoundEnabled: Bool = true
-
     /// LOCAL models: Extentos's conversational conduct layer beneath your
     /// instructions (see AssistantConfig.localConductFloor). Default on.
     public var localConductFloor: Bool = true
@@ -382,7 +373,6 @@ public final class AssistantConfigBuilder: @unchecked Sendable {
             memoryUserId: memoryUserId,
             memoryStore: memoryStore,
             greeting: greeting,
-            wakeSoundEnabled: wakeSoundEnabled,
             localConductFloor: localConductFloor,
             fallbackGreeting: fallbackGreeting
         )
@@ -445,7 +435,6 @@ extension AssistantConfig {
             memoryUserId: memoryUserId,
             memoryStore: memoryStore,
             greeting: greeting,
-            wakeSoundEnabled: wakeSoundEnabled,
             includeDeviceInfoTool: includeDeviceInfoTool,
             deviceInfoNote: deviceInfoNote,
             localConductFloor: localConductFloor,

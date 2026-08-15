@@ -192,10 +192,6 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
 
     private let stateRef: MutableState<AssistantState>
     private var runtime: (any AssistantProviderRuntime)?
-    /// The dashboard's wake-chime URL, resolved alongside the overlay (no
-    /// code-set counterpart — dashboard-only knob).
-    private var resolvedWakeSoundUrl: String?
-    private var resolvedWakeSoundDisabled = false
     /// The model the runtime was built with (code-pin ?? dashboard overlay),
     /// fixed at start(). nil for Mock and when neither source sets one —
     /// `modelSupportsVideoInput` reads it (Kotlin keeps the whole
@@ -267,12 +263,6 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
                 let rt = await createRuntime(overlay: live)
                 try await rt.start()
                 runtime = rt
-                // Dashboard wake chime, downloaded + decoded off-thread;
-                // best-effort (default chime on any failure). Skipped when
-                // the dashboard picked "None" — nothing will play anyway.
-                if !resolvedWakeSoundDisabled {
-                    rt.applyWakeSound(resolvedWakeSoundUrl)
-                }
                 // Named sounds: the project's uploaded library becomes
                 // playSound(name)-able (named-sounds-registry decision).
                 registerDashboardSounds(live)
@@ -308,15 +298,11 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
     private func doWakeLocked() async throws {
         stateRef.set(.activating)
         // Observation only (wake ledger) — the wake flow itself is locked.
-        let chime = config.wakeSoundEnabled && !resolvedWakeSoundDisabled
-        WakeLedger.shared.note("wake: begin (chime \(chime ? "on" : "off"))")
-        // Wake chime the moment activation begins — it fills the connect
-        // wait and queues ahead of the greeting on the same audio path.
-        // Dashboard "None" (wakeSoundDisabled) silences it; code-set
-        // wakeSoundEnabled=false also wins, independently.
-        if chime {
-            runtime?.playWakeSound()
-        }
+        WakeLedger.shared.note("wake: begin")
+        // The SDK plays nothing here. An app that wants an activation cue
+        // plays it itself from its own wake path — audio.playSound(name)
+        // against a dashboard sound slot, or its own registerSound clip
+        // (RDQ 98).
         do {
             guard let rt = runtime else {
                 WakeLedger.shared.note("wake: FAILED — no runtime")
@@ -525,13 +511,10 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
     private func resolveLiveOverlay() async -> LiveAssistantConfig? {
         guard case .managed = config.provider else { return nil }
         // NOTE: the fetch is no longer skipped when every overlay field is
-        // code-pinned — the payload now also carries the project's named
-        // sounds + the wake-sound "None" flag, which apply regardless.
+        // code-pinned — the payload also carries the project's named sounds,
+        // which apply regardless.
         // Bounded (4s) + best-effort, so start never blocks on it.
-        let live = await configFetcher()
-        resolvedWakeSoundUrl = live?.wakeSoundUrl
-        resolvedWakeSoundDisabled = live?.wakeSoundDisabled ?? false
-        return live
+        return await configFetcher()
     }
 
     /// Download + decode the dashboard sound library into the shared
@@ -752,8 +735,6 @@ internal protocol AssistantProviderRuntime: Sendable {
     func setModel(_ model: String)
     func updateInstructions(_ instructions: String)
     func cancelSpeak()
-    func playWakeSound()
-    func applyWakeSound(_ url: String?)
     func conversationHistory(limit: Int) -> [Turn]
     func clearHistory()
     func appendHistory(_ turn: Turn)
@@ -775,8 +756,6 @@ internal extension AssistantProviderRuntime {
     func setModel(_ model: String) {}
     func updateInstructions(_ instructions: String) {}
     func cancelSpeak() {}
-    func playWakeSound() {}
-    func applyWakeSound(_ url: String?) {}
     func conversationHistory(limit: Int) -> [Turn] { [] }
     func clearHistory() {}
     func appendHistory(_ turn: Turn) {}

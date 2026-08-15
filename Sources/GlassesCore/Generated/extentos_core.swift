@@ -3504,14 +3504,6 @@ public protocol RealtimeVoiceCoreProtocol : AnyObject {
      */
     func onText(text: String) 
     
-    /**
-     * Play the wake-confirmation chime through the audio sink. The shell calls
-     * this at the Activating transition (gated on the glasses audio-link) so it
-     * fills the connect-wait silence; it rides the same outgoing-audio path as
-     * the greeting, which queues behind it (Finding A).
-     */
-    func playWakeSound() 
-    
     func replaceHistory(turns: [RealtimeTurn]) 
     
     func say(text: String) 
@@ -3530,14 +3522,6 @@ public protocol RealtimeVoiceCoreProtocol : AnyObject {
     func setReasoningEffort(effortWire: String) 
     
     func setVoice(voice: String) 
-    
-    /**
-     * Set a custom wake chime (decoded PCM16-LE mono at the active fidelity
-     * rate), or clear it with empty `pcm` to fall back to the synth default. The
-     * shell calls this at session start after fetching + decoding the dashboard
-     * `wake_sound_url`.
-     */
-    func setWakeSound(sampleRate: Int32, pcm: Data) 
     
     /**
      * The shell finished summarizing (the `request_summary` callback) — apply it.
@@ -3769,18 +3753,6 @@ open func onText(text: String) {try! rustCall() {
 }
 }
     
-    /**
-     * Play the wake-confirmation chime through the audio sink. The shell calls
-     * this at the Activating transition (gated on the glasses audio-link) so it
-     * fills the connect-wait silence; it rides the same outgoing-audio path as
-     * the greeting, which queues behind it (Finding A).
-     */
-open func playWakeSound() {try! rustCall() {
-    uniffi_extentos_core_fn_method_realtimevoicecore_play_wake_sound(self.uniffiClonePointer(),$0
-    )
-}
-}
-    
 open func replaceHistory(turns: [RealtimeTurn]) {try! rustCall() {
     uniffi_extentos_core_fn_method_realtimevoicecore_replace_history(self.uniffiClonePointer(),
         FfiConverterSequenceTypeRealtimeTurn.lower(turns),$0
@@ -3832,20 +3804,6 @@ open func setReasoningEffort(effortWire: String) {try! rustCall() {
 open func setVoice(voice: String) {try! rustCall() {
     uniffi_extentos_core_fn_method_realtimevoicecore_set_voice(self.uniffiClonePointer(),
         FfiConverterString.lower(voice),$0
-    )
-}
-}
-    
-    /**
-     * Set a custom wake chime (decoded PCM16-LE mono at the active fidelity
-     * rate), or clear it with empty `pcm` to fall back to the synth default. The
-     * shell calls this at session start after fetching + decoding the dashboard
-     * `wake_sound_url`.
-     */
-open func setWakeSound(sampleRate: Int32, pcm: Data) {try! rustCall() {
-    uniffi_extentos_core_fn_method_realtimevoicecore_set_wake_sound(self.uniffiClonePointer(),
-        FfiConverterInt32.lower(sampleRate),
-        FfiConverterData.lower(pcm),$0
     )
 }
 }
@@ -23778,9 +23736,6 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_text() != 26351) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_realtimevoicecore_play_wake_sound() != 56429) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_replace_history() != 18978) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -23800,9 +23755,6 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_set_voice() != 16079) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_extentos_core_checksum_method_realtimevoicecore_set_wake_sound() != 4331) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_submit_compacted() != 31767) {

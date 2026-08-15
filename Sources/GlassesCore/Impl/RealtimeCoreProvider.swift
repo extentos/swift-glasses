@@ -279,31 +279,6 @@ final class RealtimeCoreProvider: AssistantProviderRuntime, @unchecked Sendable 
     func updateInstructions(_ instructions: String) { core.updateInstructions(instructions: instructions) }
     func cancelSpeak() { core.cancelSpeak() }
 
-    // The wake chime is one ~0.5s buffer; dispatch off the caller so a
-    // blocking audio write can never delay the connect that follows it.
-    func playWakeSound() {
-        let core = self.core!
-        Task.detached { core.playWakeSound() }
-    }
-
-    // Download + decode the dashboard wake_sound_url to PCM16-LE mono at the
-    // active output rate and hand it to the core. Best-effort — any failure
-    // keeps the core's built-in default chime, so a wake never breaks.
-    func applyWakeSound(_ url: String?) {
-        guard let url, !url.isEmpty else { return }
-        let rate: Int32 = outgoingHiFi ? 24_000 : 8_000
-        let core = self.core!
-        let logger = log
-        Task.detached {
-            if let pcm = await WakeSoundLoader.load(url: url, targetRate: rate), !pcm.isEmpty {
-                core.setWakeSound(sampleRate: rate, pcm: pcm)
-                logger.info("assistant: custom wake sound loaded (\(pcm.count) B @ \(rate) Hz)")
-            } else {
-                logger.warning("assistant: custom wake sound load failed — keeping default chime")
-            }
-        }
-    }
-
     func conversationHistory(limit: Int) -> [Turn] {
         guard limit > 0 else { return [] }
         return core.conversationHistory(limit: UInt32(limit)).map { $0.toPublicTurn() }

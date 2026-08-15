@@ -1,14 +1,13 @@
 import AVFoundation
 import Foundation
 
-/// Downloads the dashboard's custom wake-chime URL and decodes it to
-/// PCM16-LE MONO at the requested rate for `RealtimeVoiceCore.setWakeSound`
-/// (the core owns storage + playback; this is pure codec plumbing).
+/// Downloads a dashboard sound-slot clip and decodes it to PCM16-LE MONO at
+/// the requested rate for the `SoundRegistry` (nothing downstream decodes,
+/// so it happens here). Name is historical: the clip library's table and
+/// bucket are still `wake_sounds` / `wake-sounds`.
 ///
-/// Best-effort by design: any failure returns nil and the caller keeps the
-/// core's built-in synth chime — a wake must never break on a bad asset.
-/// Mirrors the Kotlin `WakeSoundLoader` (one decoder; Android's second
-/// legacy decoder was deliberately not ported).
+/// Best-effort by design: any failure returns nil and that one sound is
+/// simply not registered. Mirrors the Kotlin `WakeSoundLoader`.
 enum WakeSoundLoader {
 
     /// ~10s cap on the decoded chime so a mis-uploaded song can't balloon

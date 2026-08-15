@@ -21,8 +21,9 @@ public protocol AudioClient: Sendable {
     /// Play a named sound through the glasses speaker. Names come from
     /// dashboard-uploaded sounds (registered automatically at assistant
     /// start) or code registrations via [registerSound] — code wins on
-    /// name collisions. There is no built-in vocabulary: the wake chime is
-    /// the only Extentos-shipped sound and has its own channel. Unknown
+    /// name collisions. There is no built-in vocabulary and no reserved
+    /// name: the SDK never plays a sound on its own, so an activation cue
+    /// is one your own wake path plays. Unknown
     /// name → `.platformError(code: "sound_not_found")`. Plays through the
     /// same outgoing-audio path as the assistant voice (HFP-routed on real
     /// glasses; mixes if the assistant is mid-response).

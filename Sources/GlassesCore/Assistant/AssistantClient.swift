@@ -85,7 +85,7 @@ public protocol AssistantSession: Sendable {
     /// throws `AssistantError.sessionEnded` after `stop()`.
     func start() async throws
 
-    /// Open the realtime connection: Activating → Active, wake chime,
+    /// Open the realtime connection: Activating → Active,
     /// automatic greeting per `config.greeting`, `onWake` hook. No-op if
     /// already up; throws `notReady` before `start()`, `sessionEnded`
     /// after `stop()`, `networkError` if the connect fails (state returns

@@ -8,10 +8,6 @@ struct LiveAssistantConfig: Sendable {
     let voice: String?
     let compactionModel: String?
     let withinSessionMemory: String?
-    let wakeSoundUrl: String?
-    /// The dashboard's "None" wake-sound option — skip the chime entirely
-    /// (code-set wakeSoundEnabled=false still wins the other way).
-    let wakeSoundDisabled: Bool
     /// The project's uploaded sound library (name = dashboard title). The
     /// session downloads + decodes these and registers them in the shared
     /// SoundRegistry so app code can `playSound(name)`.
@@ -60,8 +56,6 @@ struct AssistantConfigClient: Sendable {
             voice: cfg["voice"] as? String,
             compactionModel: cfg["compactionModel"] as? String,
             withinSessionMemory: cfg["withinSessionMemory"] as? String,
-            wakeSoundUrl: cfg["wakeSoundUrl"] as? String,
-            wakeSoundDisabled: cfg["wakeSoundDisabled"] as? Bool ?? false,
             sounds: sounds
         )
     }
@@ -89,7 +83,6 @@ extension AssistantConfig {
             memoryUserId: memoryUserId,
             memoryStore: memoryStore,
             greeting: greeting,
-            wakeSoundEnabled: wakeSoundEnabled,
             includeDeviceInfoTool: includeDeviceInfoTool,
             deviceInfoNote: deviceInfoNote,
             localConductFloor: localConductFloor
@@ -121,7 +114,6 @@ extension AssistantConfig {
             memoryUserId: memoryUserId,
             memoryStore: memoryStore,
             greeting: greeting,
-            wakeSoundEnabled: wakeSoundEnabled,
             includeDeviceInfoTool: includeDeviceInfoTool,
             deviceInfoNote: deviceInfoNote,
             localConductFloor: localConductFloor

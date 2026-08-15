@@ -180,12 +180,6 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
     private var pumpRunning = false
     private var lastSpokenText = ""
     private var speakingStartMs: Int64 = 0
-    /// Wake-chime duration (from the registered sound's PCM length) and the
-    /// moment the currently playing chime ends. The greeting — and only the
-    /// greeting — waits out this hold so chime and voice never overlap; no
-    /// chime registered means zero hold (no artificial wake latency).
-    private var wakeChimeMs: Int64 = 0
-    private var chimeHoldUntil: Int64 = 0
     /// True once a warm pass (weights + prefix prefill) has completed. A
     /// wake that beats the warm gets the canned greeting INSTANTLY —
     /// composing on a cold brain is guaranteed slow (10.3s measured on
@@ -901,18 +895,6 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
         let text = composed ?? config.fallbackGreeting ?? "Hi — how can I help?"
         trace.record("greeting composed in \(Self.nowMs() - t0)ms: \"\(Self.clip(text, 80))\"")
         WakeLedger.shared.note("greet: composed in \(Self.nowMs() - t0)ms")
-        // The wake chime owns the speaker until it finishes — composition
-        // ran concurrently, so this usually waits only the remainder (a
-        // canned greeting composes in ~1ms and would otherwise talk right
-        // over the chime — hardware finding, 2026-07-25).
-        stateLock.lock()
-        let holdUntil = chimeHoldUntil
-        chimeHoldUntil = 0
-        stateLock.unlock()
-        let holdMs = holdUntil - Self.nowMs()
-        if holdMs > 0 {
-            try? await Task.sleep(nanoseconds: UInt64(holdMs) * 1_000_000)
-        }
         onAssistantEvent(.assistantSpoke(transcript: text))
         appendHistoryLocked(.assistantText(text: text, timestampMs: Self.nowMs()))
         feed(.speakRequested(text: text))
@@ -955,48 +937,6 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
             Task { [transport] in
                 await voiceSynth.cancel()
                 transport.cancelOutgoingAudio()
-            }
-        }
-    }
-
-    func playWakeSound() {
-        stateLock.lock()
-        if wakeChimeMs > 0 {
-            chimeHoldUntil = Self.nowMs() + min(wakeChimeMs, 4_000)
-        }
-        stateLock.unlock()
-        Task { [weak self, audio, trace] in
-            let result = await audio.playSound("wake", volume: 1.0)
-            if case .failure(let e) = result {
-                trace.record("wake chime failed: \(e)")
-                // A chime that never played must not delay the greeting.
-                if let self {
-                    self.stateLock.lock()
-                    self.chimeHoldUntil = 0
-                    self.stateLock.unlock()
-                }
-            }
-        }
-    }
-
-    /// Dashboard wake chime for the LOCAL provider — parity with the cloud
-    /// core's setWakeSound. Decoded at the sim's 24 kHz and registered as
-    /// the "wake" named sound, which playWakeSound plays through the
-    /// transport (browser speaker in sim, device audio on hardware). Was an
-    /// empty stub — the 2026-07-24 "I don't hear my programmed sounds" bug.
-    func applyWakeSound(_ url: String?) {
-        guard let url, !url.isEmpty else { return }
-        Task { [weak self, audio, trace] in
-            if let pcm = await WakeSoundLoader.load(url: url, targetRate: 24_000), !pcm.isEmpty {
-                audio.registerSound("wake", pcm16: pcm, sampleRate: 24_000)
-                if let self {
-                    self.stateLock.lock()
-                    self.wakeChimeMs = Int64(pcm.count / 2) * 1_000 / 24_000
-                    self.stateLock.unlock()
-                }
-                trace.record("wake chime loaded (\(pcm.count) B)")
-            } else {
-                trace.record("wake chime download failed — no local default")
             }
         }
     }

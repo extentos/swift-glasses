@@ -569,7 +569,8 @@ private final class UrlSessionWsBridge: NSObject, WebSocketBridge, URLSessionWeb
 
     func connect(url: String) {
         guard let target = URL(string: url) else {
-            core?.onFailure()
+            // Matches BrowserSimTransport's bridge, which already reported this.
+            core?.onFailure(code: "invalid_url", message: "could not parse: \(url)")
             return
         }
         var request = URLRequest(url: target)
@@ -606,12 +607,38 @@ private final class UrlSessionWsBridge: NSObject, WebSocketBridge, URLSessionWeb
                     break
                 }
                 self.receiveLoop(t)
-            case .failure:
+            case .failure(let error):
                 // Distinguishing drop vs clean close happens in the delegate;
                 // a receive failure with no didClose is a network failure.
-                if self.task != nil { self.core?.onFailure() }
+                if self.task != nil {
+                    self.reportFailure(response: t.response, error: error)
+                }
             }
         }
+    }
+
+    /// Feed a failure to the core with the most specific cause available.
+    ///
+    /// The precedence and the wording are CORE-OWNED (`gatewayFailureCode` /
+    /// `gatewayFailureMessage`) so this cannot drift from Android's OkHttp
+    /// bridge. Apple's caveat is why the reason travels in a header at all:
+    /// CFNetwork replaces the HTTP reason-phrase with its own
+    /// `localizedString(forStatusCode:)`, so `project_quota_exceeded` is simply
+    /// not recoverable from the status line here, and the refusal body is empty.
+    private func reportFailure(response: URLResponse?, error: Error?) {
+        let http = response as? HTTPURLResponse
+        let status = http.map { Int32($0.statusCode) }
+        core?.onFailure(
+            code: gatewayFailureCode(
+                rejectReason: http?.value(forHTTPHeaderField: gatewayRejectReasonHeader()),
+                httpStatus: status,
+                transportFallback: (error as NSError?).map { "urlerror_\($0.code)" }
+            ),
+            message: gatewayFailureMessage(
+                httpStatus: status,
+                transportMessage: error?.localizedDescription
+            )
+        )
     }
 
     func sendText(text: String) {
@@ -646,6 +673,23 @@ private final class UrlSessionWsBridge: NSObject, WebSocketBridge, URLSessionWeb
             task = nil
             core?.onClosed()
         }
+    }
+
+    /// A REFUSED upgrade completes here and nowhere else — it never reaches
+    /// `didOpenWithProtocol` (no socket) or `didCloseWith` (no WS close frame).
+    /// This method was simply absent, so a gateway 429 produced no callback the
+    /// core could act on and the connect always ran out the 10 s open timeout
+    /// instead. `task.response` is the only place the status is reachable.
+    ///
+    /// A normal close already cleared `task` in `didCloseWith`, and a
+    /// client-initiated `close()` clears it before cancelling, so the guard
+    /// keeps this to genuine failures.
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?
+    ) {
+        guard self.task != nil else { return }
+        self.task = nil
+        reportFailure(response: task.response, error: error)
     }
 }
 

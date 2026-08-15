@@ -3479,13 +3479,32 @@ public protocol RealtimeVoiceCoreProtocol : AnyObject {
     
     func injectUserTurn(text: String) 
     
+    /**
+     * The WS closed. A close arriving before `on_open` is an open failure too —
+     * the server hung up on the handshake — so it routes through `on_failure`.
+     */
     func onClosed() 
     
     /**
-     * The WS dropped (the shell's bridge `onFailure`/`onClosed`) — kick the
-     * reconnect supervisor (no-op when already disconnected/closing).
+     * The WS failed (the shell's bridge `onFailure`) — resolve a pending open
+     * AND kick the reconnect supervisor.
+     *
+     * `code` is a machine-readable token the app can branch on
+     * (`project_quota_exceeded`, `invalid_credential`, `http_429`, …); `message`
+     * is human text. Both come from the shell, which is the only layer that can
+     * see the transport's failure detail.
+     *
+     * Resolving the pending open is the load-bearing half. This used to return
+     * early unless `connected` was already true — but `connected` only flips
+     * AFTER a successful open, so during the connect window this was a no-op and
+     * the oneshot was never resolved. Every open failure therefore had exactly
+     * one observable outcome: the full 10 s `OPEN_TIMEOUT_MS` followed by
+     * "realtime WebSocket open timed out", whether the cause was a quota
+     * rejection, a bad credential, DNS or TLS. A gateway 429 that arrived in
+     * milliseconds read as a hung network, which cost two debugging sessions
+     * (2026-07-17, 2026-08-15) before anyone thought to read the server log.
      */
-    func onFailure() 
+    func onFailure(code: String, message: String) 
     
     /**
      * A mic chunk from the audio device — encode it to the protocol's audio
@@ -3705,6 +3724,10 @@ open func injectUserTurn(text: String) {try! rustCall() {
 }
 }
     
+    /**
+     * The WS closed. A close arriving before `on_open` is an open failure too —
+     * the server hung up on the handshake — so it routes through `on_failure`.
+     */
 open func onClosed() {try! rustCall() {
     uniffi_extentos_core_fn_method_realtimevoicecore_on_closed(self.uniffiClonePointer(),$0
     )
@@ -3712,11 +3735,28 @@ open func onClosed() {try! rustCall() {
 }
     
     /**
-     * The WS dropped (the shell's bridge `onFailure`/`onClosed`) — kick the
-     * reconnect supervisor (no-op when already disconnected/closing).
+     * The WS failed (the shell's bridge `onFailure`) — resolve a pending open
+     * AND kick the reconnect supervisor.
+     *
+     * `code` is a machine-readable token the app can branch on
+     * (`project_quota_exceeded`, `invalid_credential`, `http_429`, …); `message`
+     * is human text. Both come from the shell, which is the only layer that can
+     * see the transport's failure detail.
+     *
+     * Resolving the pending open is the load-bearing half. This used to return
+     * early unless `connected` was already true — but `connected` only flips
+     * AFTER a successful open, so during the connect window this was a no-op and
+     * the oneshot was never resolved. Every open failure therefore had exactly
+     * one observable outcome: the full 10 s `OPEN_TIMEOUT_MS` followed by
+     * "realtime WebSocket open timed out", whether the cause was a quota
+     * rejection, a bad credential, DNS or TLS. A gateway 429 that arrived in
+     * milliseconds read as a hung network, which cost two debugging sessions
+     * (2026-07-17, 2026-08-15) before anyone thought to read the server log.
      */
-open func onFailure() {try! rustCall() {
-    uniffi_extentos_core_fn_method_realtimevoicecore_on_failure(self.uniffiClonePointer(),$0
+open func onFailure(code: String, message: String) {try! rustCall() {
+    uniffi_extentos_core_fn_method_realtimevoicecore_on_failure(self.uniffiClonePointer(),
+        FfiConverterString.lower(code),
+        FfiConverterString.lower(message),$0
     )
 }
 }
@@ -22474,6 +22514,40 @@ public func gatewayChatCompletionsUrl(env: ExtentosEnvironment) -> String {
 })
 }
 /**
+ * The machine-readable code the SDK reports when a realtime upgrade fails.
+ *
+ * Shared rather than written twice, because a per-platform fallback chain is
+ * exactly the kind of thing that drifts: an app branching on
+ * `project_quota_exceeded` must get the same string on both platforms or the
+ * branch silently works on one and not the other.
+ *
+ * Precedence: the gateway's own reason → the HTTP status it refused with → the
+ * platform's transport-error class (no server answer at all: DNS, TLS, offline).
+ */
+public func gatewayFailureCode(rejectReason: String?, httpStatus: Int32?, transportFallback: String?) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_gateway_failure_code(
+        FfiConverterOptionString.lower(rejectReason),
+        FfiConverterOptionInt32.lower(httpStatus),
+        FfiConverterOptionString.lower(transportFallback),$0
+    )
+})
+}
+/**
+ * The human-readable half of a realtime open failure. A refusal names the
+ * status (the code above carries the machine reason); anything else falls back
+ * to the platform's own error text. Deliberately carries NO response headers or
+ * body — those can hold credentials, and the transcript is telemetry.
+ */
+public func gatewayFailureMessage(httpStatus: Int32?, transportMessage: String?) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_gateway_failure_message(
+        FfiConverterOptionInt32.lower(httpStatus),
+        FfiConverterOptionString.lower(transportMessage),$0
+    )
+})
+}
+/**
  * `/v1/memory` — cross-session persistent memory (gateway-mode only; BYOK
  * deliberately keeps Extentos out of the path and has no memory endpoint).
  */
@@ -22491,6 +22565,21 @@ public func gatewayRealtimeUrl(env: ExtentosEnvironment) -> String {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_gateway_realtime_url(
         FfiConverterTypeExtentosEnvironment.lower(env),$0
+    )
+})
+}
+/**
+ * The response header the gateway names a refusal reason in
+ * (`project_quota_exceeded`, `dev_gateway_window_closed`, `invalid_credential`, …).
+ *
+ * The reason also rides the HTTP reason-phrase, which OkHttp preserves — but
+ * Apple's CFNetwork substitutes its own phrase for the status code, so on iOS
+ * the phrase is unrecoverable and the refusal body is empty. This header is the
+ * channel both platforms can actually read.
+ */
+public func gatewayRejectReasonHeader() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_gateway_reject_reason_header($0
     )
 })
 }
@@ -23277,10 +23366,19 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_gateway_chat_completions_url() != 17925) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_gateway_failure_code() != 6710) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_gateway_failure_message() != 22355) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_gateway_memory_url() != 46859) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_gateway_realtime_url() != 4950) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_gateway_reject_reason_header() != 7965) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_glasses_state_context_line() != 36631) {
@@ -23721,10 +23819,10 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_inject_user_turn() != 55117) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_closed() != 51697) {
+    if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_closed() != 56537) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_failure() != 59343) {
+    if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_failure() != 33209) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_on_mic_audio() != 64374) {

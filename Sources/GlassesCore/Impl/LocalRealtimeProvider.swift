@@ -180,6 +180,15 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
     private var pumpRunning = false
     private var lastSpokenText = ""
     private var speakingStartMs: Int64 = 0
+
+    /// Assistant-audio activity latch, mirroring the Rust core's `audio_active`
+    /// so the local tier honours the same started/finished contract as the cloud
+    /// path. Guarded by `stateLock`; the events are emitted outside it.
+    ///
+    /// The local edges are if anything sharper than the cloud ones: the pump
+    /// already waits out each segment's playback remainder, so its drain is a
+    /// real completion rather than an estimate.
+    private var audioActive = false
     /// True once a warm pass (weights + prefix prefill) has completed. A
     /// wake that beats the warm gets the canned greeting INSTANTLY —
     /// composing on a cold brain is guaranteed slow (10.3s measured on
@@ -373,6 +382,7 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
         for (_, t) in timers { t.cancel() }
         timers.removeAll()
         stateLock.unlock()
+        endAudio() // a stop mid-sentence still closes the audio pair
         onAssistantEvent(.sessionEnded(reason: .user, message: nil))
     }
 
@@ -642,6 +652,9 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
             speakingStartMs = 0
             stateLock.unlock()
             speakPump?.cancel()
+            // The cancelled pump never reaches its drain, so close the audio
+            // pair here or a consumer latched on the rising edge waits forever.
+            endAudio()
             trace.record("speech cancelled")
             Task { [audio] in await audio.cancelSpeak() }
             if let voiceSynth {
@@ -674,6 +687,27 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
         }
     }
 
+    /// Rising edge of assistant audio; emits once per stretch of speech. Called
+    /// at the FIRST audio actually handed to a player, not at enqueue time —
+    /// synthesis runs first, and the cloud path's edge means "audible now".
+    private func beginAudio() {
+        stateLock.lock()
+        let rose = !audioActive
+        audioActive = true
+        stateLock.unlock()
+        if rose { onAssistantEvent(.assistantAudioStarted) }
+    }
+
+    /// Falling edge — the pump drained, or speech was cancelled/torn down.
+    /// Idempotent, so every teardown path can call it unconditionally.
+    private func endAudio() {
+        stateLock.lock()
+        let fell = audioActive
+        audioActive = false
+        stateLock.unlock()
+        if fell { onAssistantEvent(.assistantAudioFinished) }
+    }
+
     /// Append a segment to the single-owner serial queue; start the pump if
     /// idle. One `SpeechCompleted` per segment (the machine counts).
     private func enqueueSpeak(_ text: String) {
@@ -700,6 +734,9 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
                     self.pumpRunning = false
                     self.speakingStartMs = 0
                     self.stateLock.unlock()
+                    // Queue drained and every segment has played out — the
+                    // assistant has genuinely stopped talking.
+                    self.endAudio()
                     return
                 }
                 let segment = self.speechQueue.removeFirst()
@@ -725,7 +762,8 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
         if let synth = voiceSynth, await synth.isReady() {
             trace.record("mouth: kokoro segment begin (\(segment.count) chars)")
             let t0 = Self.nowMs()
-            let seconds = await synth.synthesize(segment) { [transport] pcm, rate in
+            let seconds = await synth.synthesize(segment) { [weak self, transport] pcm, rate in
+                self?.beginAudio() // audible at the first chunk
                 transport.sendOutgoingAudioChunk(sampleRate: rate, pcmBytes: pcm)
             }
             trace.record("mouth: kokoro synth returned \(seconds.map { String(format: "%.2fs audio", $0) } ?? "nil") in \(Self.nowMs() - t0)ms")
@@ -746,6 +784,7 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
             trace.record("kokoro synthesis failed — system voice fallback for segment")
         }
         if Task.isCancelled { return }
+        beginAudio()
         let result = await audio.speak(segment)
         trace.record("mouth: system speak returned \(result)")
     }
@@ -932,6 +971,7 @@ internal final class LocalRealtimeProvider: AssistantProviderRuntime, @unchecked
         speakingStartMs = 0
         stateLock.unlock()
         speakPump?.cancel()
+        endAudio()
         Task { [audio] in await audio.cancelSpeak() }
         if let voiceSynth {
             Task { [transport] in

@@ -15557,6 +15557,32 @@ public enum RealtimeEvent {
     )
     case assistantSpoke(transcript: String
     )
+    /**
+     * The assistant started talking — the rising edge of audible speech.
+     *
+     * Distinct from `AssistantSpoke`, which carries the transcript and fires
+     * when GENERATION finished. The model streams audio faster than realtime, so
+     * `AssistantSpoke` routinely lands seconds before the speaker goes quiet;
+     * anything that should track whether the assistant is currently talking —
+     * a "speaking" indicator, a screen transition — belongs on this pair.
+     */
+    case assistantAudioStarted
+    /**
+     * The assistant stopped talking: its queued audio drained and the model
+     * finished the turn (including any tool round trip inside it).
+     *
+     * Also fires immediately when playback is cut short by barge-in or
+     * `cancelSpeak` — the audio did stop, and a consumer waiting on this edge
+     * must not hang because the user interrupted.
+     *
+     * The drain is the core's estimate from the PCM it queued, not a report
+     * from the speaker. On glasses the phone is the player and the Ray-Bans are
+     * a Bluetooth sink, so the last ~100-200 ms of the hop is invisible to any
+     * layer of this SDK. Treat it as "has finished, to within ~a quarter
+     * second", which is what a UI transition needs and more than a `speak()`
+     * completion ever promised.
+     */
+    case assistantAudioFinished
     case toolCalled(name: String, argsJson: String, callId: String
     )
     case toolResult(callId: String, name: String, output: String, isError: Bool, durationMs: Int64
@@ -15603,25 +15629,29 @@ public struct FfiConverterTypeRealtimeEvent: FfiConverterRustBuffer {
         case 2: return .assistantSpoke(transcript: try FfiConverterString.read(from: &buf)
         )
         
-        case 3: return .toolCalled(name: try FfiConverterString.read(from: &buf), argsJson: try FfiConverterString.read(from: &buf), callId: try FfiConverterString.read(from: &buf)
+        case 3: return .assistantAudioStarted
+        
+        case 4: return .assistantAudioFinished
+        
+        case 5: return .toolCalled(name: try FfiConverterString.read(from: &buf), argsJson: try FfiConverterString.read(from: &buf), callId: try FfiConverterString.read(from: &buf)
         )
         
-        case 4: return .toolResult(callId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), output: try FfiConverterString.read(from: &buf), isError: try FfiConverterBool.read(from: &buf), durationMs: try FfiConverterInt64.read(from: &buf)
+        case 6: return .toolResult(callId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), output: try FfiConverterString.read(from: &buf), isError: try FfiConverterBool.read(from: &buf), durationMs: try FfiConverterInt64.read(from: &buf)
         )
         
-        case 5: return .error(kind: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
+        case 7: return .error(kind: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
         )
         
-        case 6: return .sessionStarted(model: try FfiConverterString.read(from: &buf), voice: try FfiConverterString.read(from: &buf)
+        case 8: return .sessionStarted(model: try FfiConverterString.read(from: &buf), voice: try FfiConverterString.read(from: &buf)
         )
         
-        case 7: return .reconnected(reason: try FfiConverterString.read(from: &buf), downtimeMs: try FfiConverterInt64.read(from: &buf)
+        case 9: return .reconnected(reason: try FfiConverterString.read(from: &buf), downtimeMs: try FfiConverterInt64.read(from: &buf)
         )
         
-        case 8: return .sessionEnded(reason: try FfiConverterString.read(from: &buf), message: try FfiConverterOptionString.read(from: &buf)
+        case 10: return .sessionEnded(reason: try FfiConverterString.read(from: &buf), message: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 9: return .silenceTimeout
+        case 11: return .silenceTimeout
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -15641,15 +15671,23 @@ public struct FfiConverterTypeRealtimeEvent: FfiConverterRustBuffer {
             FfiConverterString.write(transcript, into: &buf)
             
         
-        case let .toolCalled(name,argsJson,callId):
+        case .assistantAudioStarted:
             writeInt(&buf, Int32(3))
+        
+        
+        case .assistantAudioFinished:
+            writeInt(&buf, Int32(4))
+        
+        
+        case let .toolCalled(name,argsJson,callId):
+            writeInt(&buf, Int32(5))
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(argsJson, into: &buf)
             FfiConverterString.write(callId, into: &buf)
             
         
         case let .toolResult(callId,name,output,isError,durationMs):
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(6))
             FfiConverterString.write(callId, into: &buf)
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(output, into: &buf)
@@ -15658,31 +15696,31 @@ public struct FfiConverterTypeRealtimeEvent: FfiConverterRustBuffer {
             
         
         case let .error(kind,message):
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(kind, into: &buf)
             FfiConverterString.write(message, into: &buf)
             
         
         case let .sessionStarted(model,voice):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(model, into: &buf)
             FfiConverterString.write(voice, into: &buf)
             
         
         case let .reconnected(reason,downtimeMs):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(reason, into: &buf)
             FfiConverterInt64.write(downtimeMs, into: &buf)
             
         
         case let .sessionEnded(reason,message):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(reason, into: &buf)
             FfiConverterOptionString.write(message, into: &buf)
             
         
         case .silenceTimeout:
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(11))
         
         }
     }

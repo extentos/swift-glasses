@@ -32,7 +32,36 @@ public enum AssistantEvent: Sendable {
     case userSpoke(transcript: String)
 
     /// Model finished an utterance (output transcript).
+    ///
+    /// This is GENERATION finishing, not playback. The model streams audio
+    /// faster than realtime, so this routinely fires seconds before the
+    /// assistant stops talking — use `assistantAudioFinished` for anything that
+    /// must wait until it has actually finished.
     case assistantSpoke(transcript: String)
+
+    /// The assistant started talking — the rising edge of audible speech.
+    ///
+    /// Pairs with `assistantAudioFinished`, strictly alternating: exactly one
+    /// finish follows each start. This is the pair a "Speaking" indicator or a
+    /// screen transition belongs on, NOT `assistantSpoke`, which is the
+    /// transcript and fires much earlier.
+    case assistantAudioStarted
+
+    /// The assistant stopped talking: its queued audio drained and the model
+    /// finished the turn, including any tool round trip inside it. A turn that
+    /// called a tool and then kept speaking finishes after the LAST segment, not
+    /// at the tool call.
+    ///
+    /// Also fires immediately when playback is cut short by barge-in or
+    /// `cancelSpeak()` — the audio did stop, and code waiting on this edge must
+    /// not hang because the user interrupted.
+    ///
+    /// The drain is the SDK's estimate from the PCM it queued, not a report from
+    /// the speaker. On glasses the phone is the player and the glasses are a
+    /// Bluetooth sink, so the last ~100-200 ms of the hop is invisible to every
+    /// layer of this SDK. Read it as "has finished, to within about a quarter
+    /// second" — which is what a UI transition needs.
+    case assistantAudioFinished
 
     /// Model decided to call a tool. Fires BEFORE the tool body runs.
     case toolCalled(name: String, args: JSONValue, callId: String)

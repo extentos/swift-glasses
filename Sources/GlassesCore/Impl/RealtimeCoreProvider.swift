@@ -412,6 +412,10 @@ final class RealtimeCoreProvider: AssistantProviderRuntime, @unchecked Sendable 
                 owner.onAssistantEvent(.userSpoke(transcript: transcript))
             case .assistantSpoke(let transcript):
                 owner.onAssistantEvent(.assistantSpoke(transcript: transcript))
+            case .assistantAudioStarted:
+                owner.onAssistantEvent(.assistantAudioStarted)
+            case .assistantAudioFinished:
+                owner.onAssistantEvent(.assistantAudioFinished)
             // Bind by LABEL, not position. The generated case is
             // `toolCalled(name:argsJson:callId:)` and this destructured it
             // positionally as (name, callId, argsJson) — so every event carried

@@ -159,7 +159,7 @@ internal final class MockAssistantProvider: AssistantProviderRuntime, @unchecked
 
         guard let matched else {
             let msg = "Mock found no tool matching \(String(text.prefix(60)))"
-            onAssistantEvent(.assistantSpoke(transcript: msg))
+            emitSpoken(msg)
             return InjectOutcome(matched: nil, error: msg)
         }
 
@@ -198,9 +198,20 @@ internal final class MockAssistantProvider: AssistantProviderRuntime, @unchecked
         let confirmation = isErr
             ? "sorry, \(matched.name) failed: \(outputStr)"
             : "ok, \(matched.name)"
-        onAssistantEvent(.assistantSpoke(transcript: confirmation))
+        emitSpoken(confirmation)
 
         return InjectOutcome(matched: matched.name, error: nil)
+    }
+
+    /// A synthetic utterance, bracketed by the same audio pair the real
+    /// providers emit. The mock has no audio device, so "playback" is
+    /// instantaneous and the two edges land back to back — but they DO land, so
+    /// an agent test written against the mock exercises the contract it will
+    /// meet in production instead of discovering the events only on hardware.
+    private func emitSpoken(_ text: String) {
+        onAssistantEvent(.assistantAudioStarted)
+        onAssistantEvent(.assistantSpoke(transcript: text))
+        onAssistantEvent(.assistantAudioFinished)
     }
 
     private func matchByDescription(text: String) -> ToolDefinition? {

@@ -87,6 +87,14 @@ internal final class AssistantTransportBridge: @unchecked Sendable {
                 "type": "assistant.assistant_spoke",
                 "transcript": transcript,
             ]
+        case .assistantAudioStarted:
+            return [
+                "type": "assistant.audio_started",
+            ]
+        case .assistantAudioFinished:
+            return [
+                "type": "assistant.audio_finished",
+            ]
         case .toolCalled(let name, let args, let callId):
             return [
                 "type": "assistant.tool_called",

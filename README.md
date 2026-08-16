@@ -8,7 +8,7 @@ Meta Ray-Ban glasses are supported in production today.
 
 > **This is a distribution repo.** Source of truth is the Extentos monorepo;
 > the contents here are published by its release pipeline. Please don't open
-> PRs against this repo — report issues via [extentos.com/docs](https://extentos.com/docs).
+> PRs against this repo. Bug reports are welcome: see [Issues](#issues).
 
 ## Install
 
@@ -58,6 +58,21 @@ A Meta-only app inherits nothing from them.
 Versions are in lockstep with the Android SDK (`com.extentos:glasses` on Maven
 Central): the same version number ships the same shared core on both platforms.
 Release notes are on the [releases page](https://github.com/extentos/swift-glasses/releases).
+
+## Issues
+
+iOS SDK bugs and questions belong here. Android SDK issues go to
+[extentos/android-glasses](https://github.com/extentos/android-glasses), and
+MCP server, simulator or docs issues to
+[extentos/mcp-server](https://github.com/extentos/mcp-server).
+
+Security issues are the exception: never file those publicly. Email
+hello@extentos.com with the subject prefix `[SECURITY]`, see the
+[security policy](https://github.com/extentos/.github/blob/main/SECURITY.md).
+
+Before filing, `npx @extentos/mcp-server@latest whoami` prints the versions and
+install state a report needs. Full routing and the bug-report checklist:
+[extentos.com/docs/resources/support](https://extentos.com/docs/resources/support).
 
 The fastest path to a working integration is agent-driven: install
 `@extentos/mcp-server` in your AI coding agent and let it scaffold the app —

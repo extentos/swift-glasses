@@ -3534,6 +3534,19 @@ public protocol RealtimeVoiceCoreProtocol : AnyObject {
      */
     func sendVideoFrame(frame: Data, mimeType: String) 
     
+    /**
+     * Turn outgoing-audio metering on or off.
+     *
+     * Off by default and free while off: no RMS is computed, no frames are
+     * buffered, no events are emitted, and the activity watcher stays on its
+     * slow tick. The shell flips this from its levels stream's subscriber
+     * count, so the cost exists only while an app is actually drawing.
+     *
+     * Turning it off mid-speech emits nothing further — the subscriber has
+     * gone, so there is nobody owed a closing zero.
+     */
+    func setAudioLevelsEnabled(enabled: Bool) 
+    
     func setMemoryPreamble(preamble: String?) 
     
     func setModel(model: String) 
@@ -3816,6 +3829,24 @@ open func sendVideoFrame(frame: Data, mimeType: String) {try! rustCall() {
     uniffi_extentos_core_fn_method_realtimevoicecore_send_video_frame(self.uniffiClonePointer(),
         FfiConverterData.lower(frame),
         FfiConverterString.lower(mimeType),$0
+    )
+}
+}
+    
+    /**
+     * Turn outgoing-audio metering on or off.
+     *
+     * Off by default and free while off: no RMS is computed, no frames are
+     * buffered, no events are emitted, and the activity watcher stays on its
+     * slow tick. The shell flips this from its levels stream's subscriber
+     * count, so the cost exists only while an app is actually drawing.
+     *
+     * Turning it off mid-speech emits nothing further — the subscriber has
+     * gone, so there is nobody owed a closing zero.
+     */
+open func setAudioLevelsEnabled(enabled: Bool) {try! rustCall() {
+    uniffi_extentos_core_fn_method_realtimevoicecore_set_audio_levels_enabled(self.uniffiClonePointer(),
+        FfiConverterBool.lower(enabled),$0
     )
 }
 }
@@ -15583,6 +15614,21 @@ public enum RealtimeEvent {
      * completion ever promised.
      */
     case assistantAudioFinished
+    /**
+     * How loudly the assistant is speaking right now — RMS of the audio
+     * currently audible, normalised 0...1 against full scale.
+     *
+     * Opt-in: nothing is computed or emitted until a consumer calls
+     * `set_audio_levels_enabled(true)`, so an app that never asks pays nothing.
+     *
+     * Emitted at a fixed ~25 Hz **on the playback clock**, not when audio was
+     * queued — the model streams faster than real time, so metering at enqueue
+     * would run a visualiser ahead of the voice by the whole queue depth. Only
+     * ever between `AssistantAudioStarted` and `AssistantAudioFinished`, with a
+     * closing `0.0` when playback is cut short.
+     */
+    case assistantAudioLevel(level: Float
+    )
     case toolCalled(name: String, argsJson: String, callId: String
     )
     case toolResult(callId: String, name: String, output: String, isError: Bool, durationMs: Int64
@@ -15633,25 +15679,28 @@ public struct FfiConverterTypeRealtimeEvent: FfiConverterRustBuffer {
         
         case 4: return .assistantAudioFinished
         
-        case 5: return .toolCalled(name: try FfiConverterString.read(from: &buf), argsJson: try FfiConverterString.read(from: &buf), callId: try FfiConverterString.read(from: &buf)
+        case 5: return .assistantAudioLevel(level: try FfiConverterFloat.read(from: &buf)
         )
         
-        case 6: return .toolResult(callId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), output: try FfiConverterString.read(from: &buf), isError: try FfiConverterBool.read(from: &buf), durationMs: try FfiConverterInt64.read(from: &buf)
+        case 6: return .toolCalled(name: try FfiConverterString.read(from: &buf), argsJson: try FfiConverterString.read(from: &buf), callId: try FfiConverterString.read(from: &buf)
         )
         
-        case 7: return .error(kind: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
+        case 7: return .toolResult(callId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf), output: try FfiConverterString.read(from: &buf), isError: try FfiConverterBool.read(from: &buf), durationMs: try FfiConverterInt64.read(from: &buf)
         )
         
-        case 8: return .sessionStarted(model: try FfiConverterString.read(from: &buf), voice: try FfiConverterString.read(from: &buf)
+        case 8: return .error(kind: try FfiConverterString.read(from: &buf), message: try FfiConverterString.read(from: &buf)
         )
         
-        case 9: return .reconnected(reason: try FfiConverterString.read(from: &buf), downtimeMs: try FfiConverterInt64.read(from: &buf)
+        case 9: return .sessionStarted(model: try FfiConverterString.read(from: &buf), voice: try FfiConverterString.read(from: &buf)
         )
         
-        case 10: return .sessionEnded(reason: try FfiConverterString.read(from: &buf), message: try FfiConverterOptionString.read(from: &buf)
+        case 10: return .reconnected(reason: try FfiConverterString.read(from: &buf), downtimeMs: try FfiConverterInt64.read(from: &buf)
         )
         
-        case 11: return .silenceTimeout
+        case 11: return .sessionEnded(reason: try FfiConverterString.read(from: &buf), message: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 12: return .silenceTimeout
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -15679,15 +15728,20 @@ public struct FfiConverterTypeRealtimeEvent: FfiConverterRustBuffer {
             writeInt(&buf, Int32(4))
         
         
-        case let .toolCalled(name,argsJson,callId):
+        case let .assistantAudioLevel(level):
             writeInt(&buf, Int32(5))
+            FfiConverterFloat.write(level, into: &buf)
+            
+        
+        case let .toolCalled(name,argsJson,callId):
+            writeInt(&buf, Int32(6))
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(argsJson, into: &buf)
             FfiConverterString.write(callId, into: &buf)
             
         
         case let .toolResult(callId,name,output,isError,durationMs):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(callId, into: &buf)
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(output, into: &buf)
@@ -15696,31 +15750,31 @@ public struct FfiConverterTypeRealtimeEvent: FfiConverterRustBuffer {
             
         
         case let .error(kind,message):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(kind, into: &buf)
             FfiConverterString.write(message, into: &buf)
             
         
         case let .sessionStarted(model,voice):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(model, into: &buf)
             FfiConverterString.write(voice, into: &buf)
             
         
         case let .reconnected(reason,downtimeMs):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(reason, into: &buf)
             FfiConverterInt64.write(downtimeMs, into: &buf)
             
         
         case let .sessionEnded(reason,message):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(11))
             FfiConverterString.write(reason, into: &buf)
             FfiConverterOptionString.write(message, into: &buf)
             
         
         case .silenceTimeout:
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(12))
         
         }
     }
@@ -23879,6 +23933,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_send_video_frame() != 48887) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_realtimevoicecore_set_audio_levels_enabled() != 956) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_set_memory_preamble() != 8830) {

@@ -200,6 +200,16 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
     private let soundRegistry: SoundRegistry?
     private var sleepPhraseRegistrations: [any VoiceRegistration] = []
 
+    /// Live `audioLevels()` subscribers. Metering runs only while this is
+    /// non-zero — AsyncStream has no subscriber count of its own, so the pair of
+    /// create/onTermination hooks below keeps it. Guarded by `stateLock`.
+    private var levelSubscribers = 0
+    private var levelSinks: [UUID: AsyncStream<Float>.Continuation] = [:]
+    /// Its own lock rather than sharing the session's other state: this is
+    /// touched at ~25 Hz from the provider's observer thread, and it must never
+    /// be able to contend with a lifecycle transition.
+    private let levelLock = NSLock()
+
     init(
         config: AssistantConfig,
         audio: any AudioClient,
@@ -439,6 +449,43 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
         (try activeRuntime()).updateInstructions(instructions)
     }
 
+    func audioLevels() -> AsyncStream<Float> {
+        let id = UUID()
+        // `.bufferingNewest(8)`: a visualiser wants the newest value, never a
+        // backlog — a slow consumer that buffered everything would drag the ring
+        // behind the voice, the exact failure the playback-clock alignment
+        // exists to avoid.
+        return AsyncStream(bufferingPolicy: .bufferingNewest(8)) { continuation in
+            levelLock.lock()
+            levelSinks[id] = continuation
+            levelSubscribers += 1
+            let isFirst = levelSubscribers == 1
+            let rt = runtime
+            levelLock.unlock()
+            if isFirst { rt?.setAudioLevelsEnabled(true) }
+
+            continuation.onTermination = { [weak self] _ in
+                guard let self else { return }
+                self.levelLock.lock()
+                self.levelSinks.removeValue(forKey: id)
+                self.levelSubscribers = max(0, self.levelSubscribers - 1)
+                let isLast = self.levelSubscribers == 0
+                let rt = self.runtime
+                self.levelLock.unlock()
+                if isLast { rt?.setAudioLevelsEnabled(false) }
+            }
+        }
+    }
+
+    /// Fan a level out to every live subscriber. Called from the provider's
+    /// observer at ~25 Hz, so it does no work beyond a lock and a yield.
+    private func emitLevel(_ level: Float) {
+        levelLock.lock()
+        let sinks = levelSinks.values
+        levelLock.unlock()
+        for sink in sinks { sink.yield(level) }
+    }
+
     func cancelSpeak() async {
         runtime?.cancelSpeak()
     }
@@ -659,6 +706,7 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
                     guard let self else { return }
                     Task { try? await self.sleep() }
                 },
+                onAudioLevel: { [weak self] level in self?.emitLevel(level) },
                 glassesStateLine: nil  // DSP-20 wiring lands with Phase-D display state.
             )
         case .mock(let behavior):
@@ -735,6 +783,7 @@ internal protocol AssistantProviderRuntime: Sendable {
     func setModel(_ model: String)
     func updateInstructions(_ instructions: String)
     func cancelSpeak()
+    func setAudioLevelsEnabled(_ enabled: Bool)
     func conversationHistory(limit: Int) -> [Turn]
     func clearHistory()
     func appendHistory(_ turn: Turn)
@@ -756,6 +805,11 @@ internal extension AssistantProviderRuntime {
     func setModel(_ model: String) {}
     func updateInstructions(_ instructions: String) {}
     func cancelSpeak() {}
+    /// No-op default, so a provider with no core-backed playback stays
+    /// source-compatible and simply produces no levels — Mock (no audio device)
+    /// and the local tier (its speech pump is shell-side and bypasses the core;
+    /// see the shell-debt ledger). `audioLevels()` documents that.
+    func setAudioLevelsEnabled(_ enabled: Bool) {}
     func conversationHistory(limit: Int) -> [Turn] { [] }
     func clearHistory() {}
     func appendHistory(_ turn: Turn) {}

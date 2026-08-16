@@ -132,6 +132,31 @@ public protocol AssistantSession: Sendable {
     /// response + flushes queued audio).
     func cancelSpeak() async
 
+    /// How loudly the assistant is speaking right now — RMS of the audio
+    /// currently audible, normalised `0...1` against full scale, at ~25 Hz.
+    ///
+    /// The output-side counterpart to `AudioClient.audioChunks`, which meters the
+    /// wearer. Together they drive a two-sided voice visualiser.
+    ///
+    /// **Aligned to what is heard, not what was queued.** The model streams its
+    /// reply faster than real time, so a chunk handed to the player stays audible
+    /// for seconds afterwards; levels are placed on the playback clock so a ring
+    /// moves *with* the voice instead of leading it by the queue depth.
+    ///
+    /// Values arrive only between `assistantAudioStarted` and
+    /// `assistantAudioFinished`, with a final `0` when playback is cut short by
+    /// barge-in, `cancelSpeak()` or session end — so a visualiser lands at rest
+    /// rather than freezing mid-swell at the moment the user interrupted.
+    ///
+    /// **Opt-in and free when unused:** nothing is computed or emitted until the
+    /// first subscriber, and metering stops when the last one goes away.
+    ///
+    /// Like `assistantAudioFinished` this is an estimate — the phone is the
+    /// player and a wearable is a Bluetooth sink, so the tail of that hop is not
+    /// observable. Right for a visualiser, not for sample-accurate metering. It
+    /// is RMS, not peak.
+    func audioLevels() -> AsyncStream<Float>
+
     /// Stream one video frame into the live conversation — the assistant
     /// sees what the glasses see and can comment mid-dialogue.
     ///

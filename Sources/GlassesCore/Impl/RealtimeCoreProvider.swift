@@ -75,6 +75,10 @@ final class RealtimeCoreProvider: AssistantProviderRuntime, @unchecked Sendable 
     private let transport: any GlassesTransport
     private let onAssistantEvent: @Sendable (AssistantEvent) -> Void
     private let onSilenceTimeout: @Sendable () -> Void
+    /// Outgoing-audio RMS while the assistant speaks. Deliberately NOT routed
+    /// through `onAssistantEvent`: at ~25 Hz it would make every consumer of the
+    /// shared event stream pay for a feature one app subscribed to.
+    private let onAudioLevel: @Sendable (Float) -> Void
     private let glassesStateLine: (@Sendable () -> String?)?
 
     private let log = Logger(subsystem: "com.extentos.glasses", category: "assistant")
@@ -99,6 +103,7 @@ final class RealtimeCoreProvider: AssistantProviderRuntime, @unchecked Sendable 
         transport: any GlassesTransport,
         onAssistantEvent: @escaping @Sendable (AssistantEvent) -> Void,
         onSilenceTimeout: @escaping @Sendable () -> Void,
+        onAudioLevel: @escaping @Sendable (Float) -> Void = { _ in },
         glassesStateLine: (@Sendable () -> String?)?
     ) {
         self.config = config
@@ -111,6 +116,7 @@ final class RealtimeCoreProvider: AssistantProviderRuntime, @unchecked Sendable 
         self.transport = transport
         self.onAssistantEvent = onAssistantEvent
         self.onSilenceTimeout = onSilenceTimeout
+        self.onAudioLevel = onAudioLevel
         self.glassesStateLine = glassesStateLine
         self.toolsByName = Dictionary(uniqueKeysWithValues: config.tools.map { ($0.name, $0) })
         self.wsBridge = UrlSessionWsBridge()
@@ -279,6 +285,8 @@ final class RealtimeCoreProvider: AssistantProviderRuntime, @unchecked Sendable 
     func updateInstructions(_ instructions: String) { core.updateInstructions(instructions: instructions) }
     func cancelSpeak() { core.cancelSpeak() }
 
+    func setAudioLevelsEnabled(_ enabled: Bool) { core.setAudioLevelsEnabled(enabled: enabled) }
+
     func conversationHistory(limit: Int) -> [Turn] {
         guard limit > 0 else { return [] }
         return core.conversationHistory(limit: UInt32(limit)).map { $0.toPublicTurn() }
@@ -416,6 +424,8 @@ final class RealtimeCoreProvider: AssistantProviderRuntime, @unchecked Sendable 
                 owner.onAssistantEvent(.assistantAudioStarted)
             case .assistantAudioFinished:
                 owner.onAssistantEvent(.assistantAudioFinished)
+            case .assistantAudioLevel(let level):
+                owner.onAudioLevel(level)
             // Bind by LABEL, not position. The generated case is
             // `toolCalled(name:argsJson:callId:)` and this destructured it
             // positionally as (name, callId, argsJson) — so every event carried

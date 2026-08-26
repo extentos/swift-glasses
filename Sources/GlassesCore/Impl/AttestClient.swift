@@ -143,7 +143,8 @@ actor AttestClient {
         // The /attest/initial endpoint is co-located with /attest on the same
         // host — just append "/initial".
         let initialURL = attestEndpoint.appendingPathComponent("initial")
-        let body: [String: Any] = [
+        let storeProof = await StoreProof.fetch()
+        var body: [String: Any] = [
             "platform": "ios",
             "attestation": attestation.base64EncodedString(),
             // DCAppAttestService returns the keyId already base64-encoded
@@ -153,7 +154,14 @@ actor AttestClient {
             "clientDataHash": clientDataHash.base64EncodedString(),
             "appId": appId,
             "anonymousDeviceId": anonymousDeviceId,
+            "storeEnvironmentHint": storeProof.hint.rawValue,
         ]
+        // Apple-signed proof of how this copy was obtained, verified
+        // server-side. Added conditionally: a Swift nil boxed into Any is not a
+        // valid JSON object, so unconditionally inserting it would make
+        // JSONSerialization fail and take attestation down with it on every
+        // build that has no AppTransaction.
+        if let jws = storeProof.jws { body["appTransactionJws"] = jws }
         guard let resp = await postAttestJSON(url: initialURL, body: body) else { return false }
         guard resp.jwt != nil else { return false }
         // Persist the keyId so we never re-do STAGE 1 on this install.
@@ -176,14 +184,22 @@ actor AttestClient {
             AppAttestKeyStore.deleteKeyId(appId: appId, anonymousDeviceId: anonymousDeviceId)
             return false
         }
-        let body: [String: Any] = [
+        let storeProof = await StoreProof.fetch()
+        var body: [String: Any] = [
             "platform": "ios",
             "assertion": assertion.base64EncodedString(),
             "keyId": keyId,
             "challenge": clientDataHash.base64EncodedString(),
             "appId": appId,
             "anonymousDeviceId": anonymousDeviceId,
+            "storeEnvironmentHint": storeProof.hint.rawValue,
         ]
+        // Apple-signed proof of how this copy was obtained, verified
+        // server-side. Added conditionally: a Swift nil boxed into Any is not a
+        // valid JSON object, so unconditionally inserting it would make
+        // JSONSerialization fail and take attestation down with it on every
+        // build that has no AppTransaction.
+        if let jws = storeProof.jws { body["appTransactionJws"] = jws }
         guard let resp = await postAttestJSON(url: attestEndpoint, body: body) else { return false }
         guard resp.jwt != nil else { return false }
         cacheJWT(resp)

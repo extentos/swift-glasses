@@ -80,11 +80,24 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
             installId: nil,
             anonymousDeviceId: AnonymousDeviceId.resolve(),
             libVersion: LibraryVersion.version,
-            vendor: "meta_rayban",
+            // "meta", not the legacy "meta_rayban", which conflated vendor with
+            // Resolved from the transport at ENCODE time, mirroring Android.
+            // Was the literal "meta_rayban" — a token Android retired on
+            // 2026-07-24 and iOS was missed on. The backend had been silently
+            // normalizing it ever since (telemetry-store.ts), so the warehouse
+            // looked correct while the client kept sending a retired value.
+            // Falls back to "meta" exactly as Android does when the transport
+            // does not know yet.
+            vendor: { [transport] in transport.currentVendorId() ?? "meta" },
             platform: "ios",
             osVersion: { let v = ProcessInfo.processInfo.operatingSystemVersion
                          return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)" }(),
-            deviceModel: nil,
+            // The CONNECTED GLASSES model, not the phone. Was hardcoded nil,
+            // which is why iOS never reported which glasses were used and the
+            // vendor breakdown was Android-only. The fact was never missing —
+            // the Rust core has held it all along (`device_model_id`), and only
+            // one shell was reading it.
+            deviceModel: { [transport] in transport.currentDeviceModelId() },
             environment: effectiveEnvironment.wireValue,
             dataSharingConsent: config.dataSharingConsent
         )

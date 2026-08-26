@@ -9,5 +9,5 @@ public enum LibraryVersion {
     // The old "-pair" literals (iOS 1.1.36, Android 1.1.33) were stale by
     // 3 minors and disagreed with each other, mislabeling every telemetry
     // event (finding #12). Phase G formalizes via the swift-glasses publish.
-    public static let version: String = "2.5.0"
+    public static let version: String = "2.6.0"
 }

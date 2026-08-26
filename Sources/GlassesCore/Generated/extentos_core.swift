@@ -22125,6 +22125,16 @@ public func assistantVoicesForModel(modelId: String) -> [AssistantVoice] {
 })
 }
 /**
+ * The stable, payload-free NAME of an audio failure. See `capture_error_code`.
+ */
+public func audioErrorCode(error: AudioError) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_audio_error_code(
+        FfiConverterTypeAudioError.lower(error),$0
+    )
+})
+}
+/**
  * Whether the audio_chunks stream gate is open (privacy off AND audio
  * enabled).
  */
@@ -22211,6 +22221,33 @@ public func capabilityWireId(kind: DeclaredCapability) -> String {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_capability_wire_id(
         FfiConverterTypeDeclaredCapability.lower(kind),$0
+    )
+})
+}
+/**
+ * The stable, payload-free NAME of a capture failure, for telemetry.
+ *
+ * Companion to `capture_error_message`: that one is the sentence a human or an
+ * agent reads, this one is the token an aggregate groups by. Same Principle 1
+ * reasoning — it lives ONCE here so both shells emit identical strings and one
+ * failure never appears as two series depending on which platform the row came
+ * from.
+ *
+ * Deliberately carries NO associated values. `DisabledByUser.toggle` and
+ * `PlatformError.message` are exactly the fields that must not reach the
+ * analytics warehouse: a native message can quote whatever the caller passed
+ * in. Callers wanting the detail use `capture_error_message` and keep it in the
+ * debug log.
+ *
+ * Before this existed the shells each derived their own: Kotlin reflected over
+ * `it::class.simpleName`, and Swift — which has no safe equivalent, since
+ * `String(describing:)` interpolates associated values — hand-maintained a
+ * parallel switch. Two copies of one vocabulary, drifting on the next rename.
+ */
+public func captureErrorCode(error: CaptureError) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_capture_error_code(
+        FfiConverterTypeCaptureError.lower(error),$0
     )
 })
 }
@@ -23344,6 +23381,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_assistant_voices_for_model() != 16187) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_audio_error_code() != 42864) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_audio_stream_gate_open() != 11753) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -23366,6 +23406,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_capability_wire_id() != 40381) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_capture_error_code() != 37388) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_capture_error_message() != 59183) {

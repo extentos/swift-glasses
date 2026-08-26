@@ -61,10 +61,12 @@ final class DefaultTelemetryClient: TelemetryClient, @unchecked Sendable {
                 installId: nil,
                 anonymousDeviceId: AnonymousDeviceId.resolve(),
                 libVersion: LibraryVersion.version,
-                vendor: "meta_rayban",
+                // Convenience init with no transport to ask — the identity dial
+                // stays unknown rather than asserting a vendor we cannot see.
+                vendor: { nil },
                 platform: "ios",
                 osVersion: currentOSVersion(),
-                deviceModel: currentDeviceModel()
+                deviceModel: { nil }
             ),
             poster: nil
         )
@@ -211,10 +213,17 @@ struct TelemetryIngestContext: Sendable {
     let installId: String?
     let anonymousDeviceId: String
     let libVersion: String
-    let vendor: String?
+    /// Resolved at ENCODE time, not init time — the identity dial is empty
+    /// until the transport handshake delivers it, so a value captured when the
+    /// client is constructed is always nil. Android has used closures here
+    /// since the 2026-07-24 vendor-axis fix; iOS held static values, which is
+    /// the whole reason iOS never reported which glasses were connected.
+    let vendor: @Sendable () -> String?
     let platform: String
     let osVersion: String?
-    let deviceModel: String?
+    /// The CONNECTED GLASSES model id ("rayban_display", …) — NOT the phone.
+    /// Same encode-time resolution as `vendor`.
+    let deviceModel: @Sendable () -> String?
     /// Wire form: "development" | "beta" | "production". Default "development".
     let environment: String
     /// false → backend flags this event as not includable in vendor aggregates.
@@ -227,10 +236,10 @@ struct TelemetryIngestContext: Sendable {
         installId: String?,
         anonymousDeviceId: String,
         libVersion: String,
-        vendor: String?,
+        vendor: @escaping @Sendable () -> String?,
         platform: String,
         osVersion: String?,
-        deviceModel: String?,
+        deviceModel: @escaping @Sendable () -> String?,
         environment: String = "development",
         dataSharingConsent: Bool = true
     ) {
@@ -325,10 +334,10 @@ enum TelemetryJson {
         parts.append("\"category\":\"\(escape(e.category))\"")
         parts.append("\"name\":\"\(escape(e.name))\"")
         parts.append("\"libVersion\":\"\(escape(ctx.libVersion))\"")
-        parts.append("\"vendor\":\(ctx.vendor.map { "\"\(escape($0))\"" } ?? "null")")
+        parts.append("\"vendor\":\(ctx.vendor().map { "\"\(escape($0))\"" } ?? "null")")
         parts.append("\"platform\":\"\(escape(ctx.platform))\"")
         parts.append("\"osVersion\":\(ctx.osVersion.map { "\"\(escape($0))\"" } ?? "null")")
-        parts.append("\"deviceModel\":\(ctx.deviceModel.map { "\"\(escape($0))\"" } ?? "null")")
+        parts.append("\"deviceModel\":\(ctx.deviceModel().map { "\"\(escape($0))\"" } ?? "null")")
         parts.append("\"userSegment\":\(e.userSegment.map { "\"\(escape($0))\"" } ?? "null")")
         parts.append("\"environment\":\"\(escape(ctx.environment))\"")
         parts.append("\"dataSharingConsent\":\(ctx.dataSharingConsent ? "true" : "false")")

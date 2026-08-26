@@ -11,6 +11,51 @@ import Foundation
 protocol StreamLifecycleHook: Sendable {
     func onStart(streamType: String, props: [String: JSONValue]) async
     func onStop(streamType: String, props: [String: JSONValue], durationMs: Int64) async
+
+    /// A discrete capture finished — photo, bounded video clip, or audio clip.
+    /// Streams report through onStart/onStop; the one-shot primitives reported
+    /// nothing, so `capture_photo` — the flagship capability — had no telemetry
+    /// at all. `errorCode` is the field that answers "why did it fail".
+    /// Mirrors `StreamLifecycleHook.onCapture` in DefaultAudioClient.kt.
+    func onCapture(
+        kind: String,
+        outcome: String,
+        durationMs: Int64?,
+        errorCode: String?,
+        source: String?,
+        sizeBytes: Int64?
+    ) async
+
+    /// A speak() finished, was cancelled, or failed. `bargedIn` separates the
+    /// wearer talking over it from a programmatic cancelSpeak.
+    func onSpeak(
+        outcome: String,
+        durationMs: Int64?,
+        bargedIn: Bool?,
+        charCount: Int?,
+        errorCode: String?
+    ) async
+}
+
+// Default no-ops so existing conformers (and test doubles) need not implement
+// the discrete-capture half. Matches the Kotlin interface's default methods.
+extension StreamLifecycleHook {
+    func onCapture(
+        kind: String,
+        outcome: String,
+        durationMs: Int64?,
+        errorCode: String?,
+        source: String?,
+        sizeBytes: Int64?
+    ) async {}
+
+    func onSpeak(
+        outcome: String,
+        durationMs: Int64?,
+        bargedIn: Bool?,
+        charCount: Int?,
+        errorCode: String?
+    ) async {}
 }
 
 // Wrap an AsyncStream so that the supplied StreamLifecycleHook fires
@@ -124,6 +169,43 @@ actor TelemetryBridge: StreamLifecycleHook {
         telemetry.emitBaseline(name: "stream.stopped", properties: merged)
     }
 
+    func onCapture(
+        kind: String,
+        outcome: String,
+        durationMs: Int64?,
+        errorCode: String?,
+        source: String?,
+        sizeBytes: Int64?
+    ) {
+        var props: [String: JSONValue] = [
+            "kind": .string(kind),
+            "outcome": .string(outcome),
+        ]
+        if let d = durationMs { props["durationMs"] = .int(d) }
+        // Only on failure, and only the variant NAME — never a message, which
+        // can quote whatever the caller passed in.
+        if let e = errorCode { props["errorCode"] = .string(e) }
+        if let s = source { props["source"] = .string(s) }
+        if let b = sizeBytes { props["sizeBytes"] = .int(b) }
+        telemetry.emitBaseline(name: "capture.completed", properties: props)
+    }
+
+    func onSpeak(
+        outcome: String,
+        durationMs: Int64?,
+        bargedIn: Bool?,
+        charCount: Int?,
+        errorCode: String?
+    ) {
+        var props: [String: JSONValue] = ["outcome": .string(outcome)]
+        if let d = durationMs { props["durationMs"] = .int(d) }
+        if let b = bargedIn { props["bargedIn"] = .bool(b) }
+        // A LENGTH, never the utterance.
+        if let c = charCount { props["charCount"] = .int(Int64(c)) }
+        if let e = errorCode { props["errorCode"] = .string(e) }
+        telemetry.emitBaseline(name: "speak.completed", properties: props)
+    }
+
     // RuntimeEvent mapping ------------------------------------------------
 
     private func handleRuntimeEvent(_ ev: RuntimeEvent) {
@@ -132,6 +214,16 @@ actor TelemetryBridge: StreamLifecycleHook {
             telemetry.emitBaseline(name: "toggle.changed", properties: [
                 "key": .string(key),
                 "source": .string(toggleSourceWire(source)),
+            ])
+
+        // A capability refused because of a hardware condition. Without this a
+        // developer sees a capture fail and cannot tell whether their code is
+        // wrong or the glasses were folded shut.
+        case .coexistenceWarning(let blocked, _):
+            telemetry.emitBaseline(name: "device.condition_changed", properties: [
+                "condition": .string("audio_route"),
+                "state": .string("blocked"),
+                "blockedCapability": .string(blocked),
             ])
 
         default:

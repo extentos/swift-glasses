@@ -25,29 +25,67 @@ final class DefaultCameraClient: CameraClient, @unchecked Sendable {
     // is the shared-core CaptureError variant; `isCameraPaused()` reads the core's
     // single source of truth.
     func capturePhoto(config: PhotoConfig) async -> ExtentosResult<Photo, CaptureError> {
-        if transport.isCameraPaused() { return streamPausedDenial(op: "capture_photo") }
-        return await transport.capturePhoto(config: config)
+        await reportCapture(kind: "photo") {
+            if self.transport.isCameraPaused() { return self.streamPausedDenial(op: "capture_photo") }
+            return await self.transport.capturePhoto(config: config)
+        }
+    }
+
+    /// Times a discrete capture and reports the outcome to telemetry.
+    ///
+    /// Wraps the whole body rather than instrumenting each return, because the
+    /// gates exit early and those refusals are exactly the outcomes worth
+    /// counting — a capture blocked by a paused camera looks identical to a
+    /// broken integration from the caller's side.
+    ///
+    /// Reports the error VARIANT NAME only: CaptureError variants carry
+    /// human-readable detail that can quote caller input, and this path feeds
+    /// the analytics warehouse, not the debug log.
+    /// Mirrors `reportCapture` in DefaultCameraClient.kt.
+    private func reportCapture<T>(
+        kind: String,
+        _ block: () async -> ExtentosResult<T, CaptureError>
+    ) async -> ExtentosResult<T, CaptureError> {
+        let startMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let result = await block()
+        var outcome = "success"
+        var errorCode: String?
+        if case .failure(let err) = result {
+            outcome = "failure"
+            errorCode = captureErrorCode(error: err)
+        }
+        await onStreamLifecycle?.onCapture(
+            kind: kind,
+            outcome: outcome,
+            durationMs: Int64(Date().timeIntervalSince1970 * 1000) - startMs,
+            errorCode: errorCode,
+            source: nil,
+            sizeBytes: nil
+        )
+        return result
     }
 
     func captureVideo(config: VideoConfig) async -> ExtentosResult<VideoClip, CaptureError> {
-        if transport.isCameraPaused() { return streamPausedDenial(op: "capture_video") }
+        await reportCapture(kind: "video") {
+        if self.transport.isCameraPaused() { return self.streamPausedDenial(op: "capture_video") }
         var config = config
         // Video audio respects the raw-audio gate (privacy_mode ×
         // audio_capture_enabled — the recordDiscrete/audioChunks pair;
         // listening_mode is STT-only and deliberately NOT consulted).
         // Gate closed → capture the video WITHOUT audio, never fail it.
         // Grammar + ordering are core-owned (`resolveAudioGate`).
-        if config.includeAudio, let toggles {
+        if config.includeAudio, let toggles = self.toggles {
             let state = toggles.state.current
             let gatingToggle = resolveAudioGate(
                 privacyRaw: state.values["privacy_mode"]?.rawJsonString,
                 audioEnabledRaw: state.values["audio_capture_enabled"]?.rawJsonString
             )
-            if let gatingToggle {
+            if gatingToggle != nil {
                 config.includeAudio = false
             }
         }
-        return await transport.captureVideo(config: config)
+        return await self.transport.captureVideo(config: config)
+        }
     }
 
     /// The paused gate fired — return the typed error AND record the denial in

@@ -41,6 +41,20 @@ public protocol GlassesTransport: Sendable {
     /// hardware transports inherit the no-op. Mirrors Kotlin notifyCaptureDenied.
     func notifyCaptureDenied(op: String, reason: String, message: String)
 
+    /// The connected device's MODEL wire id ("rayban_display", "brilliant_halo",
+    /// …), or nil while unknown — the identity dial is empty until the handshake
+    /// delivers it. This is the GLASSES, never the phone.
+    ///
+    /// The fact is core-owned (`device_model_id` on the transport session in
+    /// `core/extentos-core/src/transport/mod.rs`), so conformers delegate rather
+    /// than deriving anything. Mirrors Kotlin `currentDeviceModelId()`.
+    func currentDeviceModelId() -> String?
+
+    /// The connected device's VENDOR wire id ("meta", "brilliant", "android_xr"),
+    /// or nil while unknown. Core-owned as `device_vendor`. Mirrors Kotlin
+    /// `currentVendorId()`.
+    func currentVendorId() -> String?
+
     func speak(text: String, config: SpeakConfig) async -> ExtentosResult<Void, AudioError>
     /// Cancel any in-flight TTS started via `speak(...)`. Idempotent;
     /// no-op when nothing is speaking. See `AudioClient.cancelSpeak()`
@@ -165,6 +179,12 @@ public protocol GlassesTransport: Sendable {
 
 public extension GlassesTransport {
     func handleUrl(_ url: URL) async -> Bool { false }
+
+    /// Default: identity unknown. A transport that has no session to ask says
+    /// so rather than asserting a model, so telemetry records null instead of
+    /// a guess. Transports backed by a core session override both.
+    func currentDeviceModelId() -> String? { nil }
+    func currentVendorId() -> String? { nil }
 
     /// Default: nothing armed. `RealMetaTransport` reports the bridge's
     /// first-armer lock; `BrowserSimTransport` reports its own stream registry;

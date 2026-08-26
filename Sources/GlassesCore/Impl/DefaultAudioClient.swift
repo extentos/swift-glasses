@@ -84,6 +84,22 @@ final class DefaultAudioClient: AudioClient, @unchecked Sendable {
     private var activeLocalSpeak: LocalSpeak?
 
     func speak(_ text: String, config: SpeakConfig) async -> ExtentosResult<Void, AudioError> {
+        let startMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let result = await runSpeak(text, config: config)
+        var errorCode: String?
+        if case .failure(let err) = result { errorCode = audioErrorCode(error: err) }
+        await onStreamLifecycle?.onSpeak(
+            outcome: errorCode == nil ? "completed" : "failed",
+            durationMs: Int64(Date().timeIntervalSince1970 * 1000) - startMs,
+            bargedIn: nil,
+            // Length, never the utterance — the text is the user's content.
+            charCount: text.count,
+            errorCode: errorCode
+        )
+        return result
+    }
+
+    private func runSpeak(_ text: String, config: SpeakConfig) async -> ExtentosResult<Void, AudioError> {
         if let synth = await localSynthFor(config.voice) {
             if await speakViaLocalSynth(synth, text: text, config: config) {
                 return .success(())
@@ -190,7 +206,20 @@ final class DefaultAudioClient: AudioClient, @unchecked Sendable {
     }
 
     func recordDiscrete(config: AudioRecordConfig) async -> ExtentosResult<AudioRecording, AudioError> {
-        await transport.recordAudio(config: config)
+        let startMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let result = await transport.recordAudio(config: config)
+        var errorCode: String?
+        if case .failure(let err) = result { errorCode = audioErrorCode(error: err) }
+        // A silence-bounded clip is a discrete capture, same as a photo.
+        await onStreamLifecycle?.onCapture(
+            kind: "audio_clip",
+            outcome: errorCode == nil ? "success" : "failure",
+            durationMs: Int64(Date().timeIntervalSince1970 * 1000) - startMs,
+            errorCode: errorCode,
+            source: nil,
+            sizeBytes: nil
+        )
+        return result
     }
 
     func audioChunks(config: AudioChunkConfig) -> AsyncStream<AudioChunk> {

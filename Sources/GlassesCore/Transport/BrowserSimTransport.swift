@@ -610,6 +610,22 @@ public final class BrowserSimTransport: GlassesTransport, @unchecked Sendable {
     // BrowserSimTransport.isCameraPaused.
     public nonisolated func isCameraPaused() -> Bool { core.isCameraPaused() }
 
+    /// Current glasses model wire id — read from the core, which captures it
+    /// from the session handshake. The fallbacks are the catalog-default Meta
+    /// identities and apply pre-handshake only; the backend's catalog-resolved
+    /// id is authoritative the moment it arrives.
+    /// Mirrors Kotlin `BrowserSimTransport.currentDeviceModelId()`.
+    public nonisolated func currentDeviceModelId() -> String? {
+        core.deviceModelId() ?? (isDisplayCapable() ? "rayban_display" : "rayban_meta")
+    }
+
+    /// Current vendor wire id — captured from the same session frames as the
+    /// model id, falling back to "meta" because every pre-vendor-axis backend
+    /// catalog entry is Meta. Mirrors Kotlin `currentVendorId()`.
+    public nonisolated func currentVendorId() -> String? {
+        core.deviceVendor() ?? "meta"
+    }
+
     /// Record a shell-side capture denial in the session trace. The request
     /// never crossed the wire (the shared paused gate short-circuits in
     /// `DefaultCameraClient`), so without this frame the simulator's event log

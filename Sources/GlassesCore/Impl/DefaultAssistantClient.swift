@@ -41,9 +41,6 @@ internal final class DefaultAssistantClient: AssistantClient, @unchecked Sendabl
     private let attestJWT: @Sendable () async -> String?
     /// Project app id for the live-config fetch (dashboard Agent tab).
     private let appId: String?
-    /// Shared named-sound registry — dashboard sounds land here at session
-    /// start (named-sounds-registry decision). Nil in bare tests.
-    private let soundRegistry: SoundRegistry?
     /// Voice client for sleepOnPhrase registrations; nil in bare tests.
     private let voice: (any VoiceClient)?
     /// Emit an `AssistantEvent` to the shared event-logger.
@@ -67,7 +64,6 @@ internal final class DefaultAssistantClient: AssistantClient, @unchecked Sendabl
         attestJWT: @escaping @Sendable () async -> String? = { nil },
         appId: String? = nil,
         voice: (any VoiceClient)? = nil,
-        soundRegistry: SoundRegistry? = nil,
         onAssistantEvent: @escaping @Sendable (AssistantEvent) -> Void = { _ in }
     ) {
         self.audio = audio
@@ -76,7 +72,6 @@ internal final class DefaultAssistantClient: AssistantClient, @unchecked Sendabl
         self.gatewayToken = gatewayToken
         self.attestJWT = attestJWT
         self.appId = appId
-        self.soundRegistry = soundRegistry
         self.voice = voice
         self.onAssistantEvent = onAssistantEvent
         self.singletonGuardRef = nil
@@ -134,7 +129,6 @@ internal final class DefaultAssistantClient: AssistantClient, @unchecked Sendabl
             backing: .gateway(environment: environment, authToken: gatewayToken),
             voice: voice,
             configFetcher: { await fetcher.fetch() },
-            soundRegistry: soundRegistry,
             onAssistantEvent: onAssistantEvent,
             singletonGuard: guardRef
         )
@@ -197,7 +191,6 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
     /// `modelSupportsVideoInput` reads it (Kotlin keeps the whole
     /// resolvedConfig; iOS only needs the model).
     private var resolvedModel: String?
-    private let soundRegistry: SoundRegistry?
     private var sleepPhraseRegistrations: [any VoiceRegistration] = []
 
     /// Live `audioLevels()` subscribers. Metering runs only while this is
@@ -217,7 +210,6 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
         backing: AssistantBacking,
         voice: (any VoiceClient)? = nil,
         configFetcher: @escaping @Sendable () async -> LiveAssistantConfig? = { nil },
-        soundRegistry: SoundRegistry? = nil,
         onAssistantEvent: @escaping @Sendable (AssistantEvent) -> Void,
         singletonGuard: SingletonGuard
     ) {
@@ -227,7 +219,6 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
         self.backing = backing
         self.voice = voice
         self.configFetcher = configFetcher
-        self.soundRegistry = soundRegistry
         self.onAssistantEvent = onAssistantEvent
         self.singletonGuard = singletonGuard
         self.stateRef = MutableState(AssistantState.idle)
@@ -273,9 +264,6 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
                 let rt = await createRuntime(overlay: live)
                 try await rt.start()
                 runtime = rt
-                // Named sounds: the project's uploaded library becomes
-                // playSound(name)-able (named-sounds-registry decision).
-                registerDashboardSounds(live)
                 // Sleep phrases stay registered across wake/sleep cycles;
                 // sleep() from a non-sleepable state is a core-gate no-op.
                 // (Kotlin scopes these WhenActive for log hygiene; the iOS
@@ -310,8 +298,8 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
         // Observation only (wake ledger) — the wake flow itself is locked.
         WakeLedger.shared.note("wake: begin")
         // The SDK plays nothing here. An app that wants an activation cue
-        // plays it itself from its own wake path — audio.playSound(name)
-        // against a dashboard sound slot, or its own registerSound clip
+                // plays it itself from its own wake path — its own audio,
+                // pushed with audio.sendAudio
         // (RDQ 98).
         do {
             guard let rt = runtime else {
@@ -564,33 +552,6 @@ internal final class DefaultAssistantSession: AssistantSession, @unchecked Senda
         return await configFetcher()
     }
 
-    /// Download + decode the dashboard sound library into the shared
-    /// SoundRegistry (fire-and-forget; failures skip the sound). Names
-    /// already registered are left alone — code registrations win over
-    /// dashboard sounds even when the code registered first.
-    private func registerDashboardSounds(_ live: LiveAssistantConfig?) {
-        guard let live, !live.sounds.isEmpty, let registry = soundRegistry else { return }
-        Task.detached(priority: .utility) {
-            let existing = Set(registry.names())
-            var ok: [String] = []
-            var failed: [String] = []
-            for sound in live.sounds where !existing.contains(sound.name) {
-                if let pcm = await WakeSoundLoader.load(url: sound.url, targetRate: 24_000) {
-                    registry.register(name: sound.name, sampleRate: 24_000, pcm: pcm)
-                    ok.append(sound.name)
-                } else {
-                    failed.append(sound.name)
-                }
-            }
-            // Observability for the "I don't hear my sounds" class of bug —
-            // a silent download failure is indistinguishable from a playback
-            // bug without this line.
-            WakeLedger.shared.note(
-                "sounds: registered [\(ok.joined(separator: ", "))]"
-                    + (failed.isEmpty ? "" : " FAILED [\(failed.joined(separator: ", "))]")
-            )
-        }
-    }
 
     private func createRuntime(overlay: LiveAssistantConfig?) -> any AssistantProviderRuntime {
         // Parity with Android (DefaultAssistantClient.createRuntime): when

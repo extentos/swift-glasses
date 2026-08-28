@@ -9,7 +9,6 @@ import Foundation
 final class DefaultAudioClient: AudioClient, @unchecked Sendable {
     private let transport: any GlassesTransport
     private let toggles: (any ToggleClient)?
-    private let sounds: SoundRegistry
     private let onStreamLifecycle: (any StreamLifecycleHook)?
 
     private static let privacyModeToggle = "privacy_mode"
@@ -19,36 +18,36 @@ final class DefaultAudioClient: AudioClient, @unchecked Sendable {
     init(
         transport: any GlassesTransport,
         toggles: (any ToggleClient)? = nil,
-        sounds: SoundRegistry = SoundRegistry(),
         onStreamLifecycle: (any StreamLifecycleHook)? = nil
     ) {
         self.transport = transport
         self.toggles = toggles
-        self.sounds = sounds
         self.onStreamLifecycle = onStreamLifecycle
     }
 
-    // MARK: - Named sounds (registry in the Rust core; playback = the
-    // existing outgoing-audio path, so real glasses get the HFP-routed,
-    // self-resurrecting pipe)
+    // MARK: - Raw outgoing audio (bring-your-own realtime model)
+    // The outbound half of audioChunks. Same pipe the assistant providers
+    // use; the only thing added here is the public door. Playback is NOT
+    // gated by the mic toggles, those govern capture.
 
-    func playSound(_ name: String, volume: Float) async -> ExtentosResult<Void, AudioError> {
-        guard let sound = sounds.resolve(name: name, volume: volume) else {
-            return .failure(.platformError(
-                code: "sound_not_found",
-                message: "No sound named \"\(name)\" — register it in code via registerSound or upload it in the dashboard Agent section."
-            ))
+    func sendAudio(_ pcm16: Data, sampleRate: Int) async -> ExtentosResult<Void, AudioError> {
+        // Empty chunk = nothing to send, per the core contract on
+        // validateOutgoingAudio. Rejection rules and their messages are
+        // core-owned (speak.rs) so Android cannot drift from this.
+        if pcm16.isEmpty { return .success(()) }
+        if let error = validateOutgoingAudio(sampleRate: Int32(sampleRate)) {
+            return .failure(error)
         }
-        transport.sendOutgoingAudioChunk(sampleRate: sound.sampleRate, pcmBytes: sound.pcm)
+        transport.sendOutgoingAudioChunk(sampleRate: Int32(sampleRate), pcmBytes: pcm16)
         return .success(())
     }
 
-    func registerSound(_ name: String, pcm16: Data, sampleRate: Int) {
-        sounds.register(name: name, sampleRate: Int32(sampleRate), pcm: pcm16)
+    func stopAudio() async {
+        transport.cancelOutgoingAudio()
     }
 
-    func soundNames() -> [String] {
-        sounds.names()
+    var outputFidelity: OutgoingAudioFidelity {
+        transport.outgoingAudioFidelity
     }
 
     // MARK: - Direct speak: local-voice routing (facts here, decisions in

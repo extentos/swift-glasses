@@ -14,7 +14,6 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
     private let _connection: DefaultConnectionClient
     private let _camera: DefaultCameraClient
     private let _audio: DefaultAudioClient
-    private let _soundRegistry: SoundRegistry
     private let _runtime: DefaultRuntimeClient
     private let _toggles: DefaultToggleClient
     private let _voice: DefaultVoiceClient
@@ -157,12 +156,8 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
         )
 
         self._camera = DefaultCameraClient(transport: transport, toggles: _toggles, onStreamLifecycle: bridge)
-        // One shared named-sound registry (Rust core) — dashboard sounds
         // register here at assistant start (Phase 2); code registrations
-        // via audio.registerSound overwrite (code > dashboard).
-        let soundRegistry = SoundRegistry()
-        self._soundRegistry = soundRegistry
-        self._audio = DefaultAudioClient(transport: transport, toggles: _toggles, sounds: soundRegistry, onStreamLifecycle: bridge)
+        self._audio = DefaultAudioClient(transport: transport, toggles: _toggles, onStreamLifecycle: bridge)
         self._runtime = DefaultRuntimeClient(eventLogger: eventLogger)
         // VoiceScope gating needs the live assistant state, but the voice client
         // is built before the assistant exists. Same shape as Kotlin's
@@ -237,7 +232,6 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
             // same resolved appId as telemetry/attestation above.
             appId: effectiveAppId,
             voice: _voice,
-            soundRegistry: soundRegistry,
             onAssistantEvent: { event in
                 Task { await assistantEventLogger.emit(.assistant(event)) }
             }

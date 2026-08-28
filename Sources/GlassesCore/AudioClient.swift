@@ -18,21 +18,48 @@ public protocol AudioClient: Sendable {
     /// instead.
     func cancelSpeak() async
     func earcon(_ sound: EarconSound, volume: Float) async
-    /// Play a named sound through the glasses speaker. Names come from
-    /// dashboard-uploaded sounds (registered automatically at assistant
-    /// start) or code registrations via [registerSound] — code wins on
-    /// name collisions. There is no built-in vocabulary and no reserved
-    /// name: the SDK never plays a sound on its own, so an activation cue
-    /// is one your own wake path plays. Unknown
-    /// name → `.platformError(code: "sound_not_found")`. Plays through the
-    /// same outgoing-audio path as the assistant voice (HFP-routed on real
-    /// glasses; mixes if the assistant is mid-response).
-    func playSound(_ name: String, volume: Float) async -> ExtentosResult<Void, AudioError>
-    /// Register (or replace) a named sound: mono PCM16-LE bytes at
-    /// `sampleRate` Hz. Registrations are process-lifetime.
-    func registerSound(_ name: String, pcm16: Data, sampleRate: Int)
-    /// Registered sound names, sorted.
-    func soundNames() -> [String]
+    /// Send raw PCM to the glasses speaker — the outbound half of
+    /// ``audioChunks(config:)``, and the primitive a **bring-your-own
+    /// realtime model** needs.
+    ///
+    /// `pcm16` is signed 16-bit little-endian **mono** PCM at `sampleRate`.
+    /// Chunks play in submission order and the transport buffers
+    /// downstream, so call this as your model emits rather than
+    /// accumulating a whole utterance. Empty data is a no-op.
+    ///
+    /// Pair it with ``stopAudio()`` for barge-in, and size the output
+    /// format of your model with ``outputFidelity``.
+    ///
+    /// This is playback, so it is **not** gated by the microphone toggles,
+    /// same as ``speak(_:config:)``. The mic stays open while this plays:
+    /// capture runs through the platform voice-communication unit (iOS
+    /// Voice-Processing I/O), which subtracts our own output from the
+    /// input, so a real interruption still arrives while the echo does not.
+    ///
+    /// If you want Extentos to run the conversation instead, meaning the
+    /// model, turn taking, barge-in and errors, use `glasses.assistant` and
+    /// ignore this entirely. There is deliberately nothing in between.
+    func sendAudio(_ pcm16: Data, sampleRate: Int) async -> ExtentosResult<Void, AudioError>
+    /// Drop every outgoing chunk from ``sendAudio(_:sampleRate:)`` that has
+    /// not played yet, the barge-in primitive for a customer-owned
+    /// conversation loop.
+    ///
+    /// A realtime model emits faster than realtime, so seconds of audio can
+    /// be buffered ahead when the user starts talking. This drains that
+    /// buffer so playback stops audibly now, not when the backlog runs out.
+    /// Safe to call when nothing is playing. ``cancelSpeak()`` is the
+    /// equivalent for ``speak(_:config:)``; the two do not cancel each other.
+    func stopAudio() async
+    /// What the speaker path of the current transport can actually carry, so
+    /// a bring-your-own model can ask for the right output format instead of
+    /// guessing.
+    ///
+    /// `.hiFi` on real Meta glasses (the phone-to-glasses HFP link
+    /// negotiates 16 kHz mSBC wideband) and in the browser simulator
+    /// (WebAudio, full band). Send 24 kHz mono and the path resamples as
+    /// needed; the value tells you whether asking your model for
+    /// high-quality audio is worth the bytes.
+    var outputFidelity: OutgoingAudioFidelity { get }
     func recordDiscrete(config: AudioRecordConfig) async -> ExtentosResult<AudioRecording, AudioError>
     func audioChunks(config: AudioChunkConfig) -> AsyncStream<AudioChunk>
     func transcriptions(config: TranscriptionConfig) -> AsyncStream<Transcript>
@@ -53,9 +80,6 @@ public extension AudioClient {
     }
     func transcriptions() -> AsyncStream<Transcript> {
         transcriptions(config: TranscriptionConfig())
-    }
-    func playSound(_ name: String) async -> ExtentosResult<Void, AudioError> {
-        await playSound(name, volume: 1.0)
     }
 }
 

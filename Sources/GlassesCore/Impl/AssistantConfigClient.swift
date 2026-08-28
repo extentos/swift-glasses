@@ -8,16 +8,9 @@ struct LiveAssistantConfig: Sendable {
     let voice: String?
     let compactionModel: String?
     let withinSessionMemory: String?
-    /// The project's uploaded sound library (name = dashboard title). The
     /// session downloads + decodes these and registers them in the shared
-    /// SoundRegistry so app code can `playSound(name)`.
-    let sounds: [LiveSound]
 }
 
-struct LiveSound: Sendable {
-    let name: String
-    let url: String
-}
 
 /// Fetches the project's live assistant config from the backend at session
 /// start. Exception-safe by contract: every failure (no app id, network,
@@ -45,18 +38,11 @@ struct AssistantConfigClient: Sendable {
               let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let cfg = root["config"] as? [String: Any]
         else { return nil }
-        let sounds: [LiveSound] = (cfg["sounds"] as? [[String: Any]])?.compactMap { entry in
-            guard let name = entry["name"] as? String, !name.isEmpty,
-                  let url = entry["url"] as? String, !url.isEmpty
-            else { return nil }
-            return LiveSound(name: name, url: url)
-        } ?? []
         return LiveAssistantConfig(
             realtimeModel: cfg["realtimeModel"] as? String,
             voice: cfg["voice"] as? String,
             compactionModel: cfg["compactionModel"] as? String,
-            withinSessionMemory: cfg["withinSessionMemory"] as? String,
-            sounds: sounds
+            withinSessionMemory: cfg["withinSessionMemory"] as? String
         )
     }
 }

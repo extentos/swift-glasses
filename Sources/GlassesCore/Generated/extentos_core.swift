@@ -3967,200 +3967,6 @@ public func FfiConverterTypeRealtimeVoiceCore_lower(_ value: RealtimeVoiceCore) 
 
 
 
-public protocol SoundRegistryProtocol : AnyObject {
-    
-    /**
-     * Registered names, sorted (stable for UI listings).
-     */
-    func names()  -> [String]
-    
-    /**
-     * Register or replace a sound. Last write wins — the shell registers
-     * dashboard sounds first, so customer code registrations overwrite
-     * (code > dashboard). Empty names and empty PCM are degenerate and
-     * ignored (mirrors the empty-phrase guard in VoiceCore).
-     */
-    func register(name: String, sampleRate: Int32, pcm: Data) 
-    
-    /**
-     * Remove a registration. Unknown names no-op.
-     */
-    func remove(name: String) 
-    
-    /**
-     * Resolve a name to volume-scaled PCM, or None when unregistered.
-     * Scaling is the one shared PCM gain grammar (`speak::scale_pcm16_gain`)
-     * so both shells — and the direct-speak path — stay byte-identical;
-     * 1.0 returns the registered bytes as-is.
-     */
-    func resolve(name: String, volume: Float)  -> SoundPcm?
-    
-}
-
-open class SoundRegistry:
-    SoundRegistryProtocol {
-    fileprivate let pointer: UnsafeMutableRawPointer!
-
-    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public struct NoPointer {
-        public init() {}
-    }
-
-    // TODO: We'd like this to be `private` but for Swifty reasons,
-    // we can't implement `FfiConverter` without making this `required` and we can't
-    // make it `required` without making it `public`.
-    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
-        self.pointer = pointer
-    }
-
-    // This constructor can be used to instantiate a fake object.
-    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
-    //
-    // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public init(noPointer: NoPointer) {
-        self.pointer = nil
-    }
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_extentos_core_fn_clone_soundregistry(self.pointer, $0) }
-    }
-public convenience init() {
-    let pointer =
-        try! rustCall() {
-    uniffi_extentos_core_fn_constructor_soundregistry_new($0
-    )
-}
-    self.init(unsafeFromRawPointer: pointer)
-}
-
-    deinit {
-        guard let pointer = pointer else {
-            return
-        }
-
-        try! rustCall { uniffi_extentos_core_fn_free_soundregistry(pointer, $0) }
-    }
-
-    
-
-    
-    /**
-     * Registered names, sorted (stable for UI listings).
-     */
-open func names() -> [String] {
-    return try!  FfiConverterSequenceString.lift(try! rustCall() {
-    uniffi_extentos_core_fn_method_soundregistry_names(self.uniffiClonePointer(),$0
-    )
-})
-}
-    
-    /**
-     * Register or replace a sound. Last write wins — the shell registers
-     * dashboard sounds first, so customer code registrations overwrite
-     * (code > dashboard). Empty names and empty PCM are degenerate and
-     * ignored (mirrors the empty-phrase guard in VoiceCore).
-     */
-open func register(name: String, sampleRate: Int32, pcm: Data) {try! rustCall() {
-    uniffi_extentos_core_fn_method_soundregistry_register(self.uniffiClonePointer(),
-        FfiConverterString.lower(name),
-        FfiConverterInt32.lower(sampleRate),
-        FfiConverterData.lower(pcm),$0
-    )
-}
-}
-    
-    /**
-     * Remove a registration. Unknown names no-op.
-     */
-open func remove(name: String) {try! rustCall() {
-    uniffi_extentos_core_fn_method_soundregistry_remove(self.uniffiClonePointer(),
-        FfiConverterString.lower(name),$0
-    )
-}
-}
-    
-    /**
-     * Resolve a name to volume-scaled PCM, or None when unregistered.
-     * Scaling is the one shared PCM gain grammar (`speak::scale_pcm16_gain`)
-     * so both shells — and the direct-speak path — stay byte-identical;
-     * 1.0 returns the registered bytes as-is.
-     */
-open func resolve(name: String, volume: Float) -> SoundPcm? {
-    return try!  FfiConverterOptionTypeSoundPcm.lift(try! rustCall() {
-    uniffi_extentos_core_fn_method_soundregistry_resolve(self.uniffiClonePointer(),
-        FfiConverterString.lower(name),
-        FfiConverterFloat.lower(volume),$0
-    )
-})
-}
-    
-
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeSoundRegistry: FfiConverter {
-
-    typealias FfiType = UnsafeMutableRawPointer
-    typealias SwiftType = SoundRegistry
-
-    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> SoundRegistry {
-        return SoundRegistry(unsafeFromRawPointer: pointer)
-    }
-
-    public static func lower(_ value: SoundRegistry) -> UnsafeMutableRawPointer {
-        return value.uniffiClonePointer()
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SoundRegistry {
-        let v: UInt64 = try readInt(&buf)
-        // The Rust code won't compile if a pointer won't fit in a UInt64.
-        // We have to go via `UInt` because that's the thing that's the size of a pointer.
-        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if (ptr == nil) {
-            throw UniffiInternalError.unexpectedNullPointer
-        }
-        return try lift(ptr!)
-    }
-
-    public static func write(_ value: SoundRegistry, into buf: inout [UInt8]) {
-        // This fiddling is because `Int` is the thing that's the same size as a pointer.
-        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
-    }
-}
-
-
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSoundRegistry_lift(_ pointer: UnsafeMutableRawPointer) throws -> SoundRegistry {
-    return try FfiConverterTypeSoundRegistry.lift(pointer)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSoundRegistry_lower(_ value: SoundRegistry) -> UnsafeMutableRawPointer {
-    return FfiConverterTypeSoundRegistry.lower(value)
-}
-
-
-
-
 /**
  * Tracks the duration of the current speech run from raw RMS ticks. The
  * shell feeds the returned duration to the InterruptionClassifier
@@ -8595,75 +8401,6 @@ public func FfiConverterTypeRendered_lift(_ buf: RustBuffer) throws -> Rendered 
 #endif
 public func FfiConverterTypeRendered_lower(_ value: Rendered) -> RustBuffer {
     return FfiConverterTypeRendered.lower(value)
-}
-
-
-/**
- * A resolved, volume-scaled sound ready for the platform playback path.
- */
-public struct SoundPcm {
-    public var sampleRate: Int32
-    public var pcm: Data
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(sampleRate: Int32, pcm: Data) {
-        self.sampleRate = sampleRate
-        self.pcm = pcm
-    }
-}
-
-
-
-extension SoundPcm: Equatable, Hashable {
-    public static func ==(lhs: SoundPcm, rhs: SoundPcm) -> Bool {
-        if lhs.sampleRate != rhs.sampleRate {
-            return false
-        }
-        if lhs.pcm != rhs.pcm {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(sampleRate)
-        hasher.combine(pcm)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeSoundPcm: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SoundPcm {
-        return
-            try SoundPcm(
-                sampleRate: FfiConverterInt32.read(from: &buf), 
-                pcm: FfiConverterData.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: SoundPcm, into buf: inout [UInt8]) {
-        FfiConverterInt32.write(value.sampleRate, into: &buf)
-        FfiConverterData.write(value.pcm, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSoundPcm_lift(_ buf: RustBuffer) throws -> SoundPcm {
-    return try FfiConverterTypeSoundPcm.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSoundPcm_lower(_ value: SoundPcm) -> RustBuffer {
-    return FfiConverterTypeSoundPcm.lower(value)
 }
 
 
@@ -13930,6 +13667,113 @@ public func FfiConverterTypeExtentosError_lower(_ value: ExtentosError) -> RustB
 
 
 extension ExtentosError: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Who, if anyone, can act on a failure.
+ *
+ * A ranked list of raw error codes reads as an alarm, and most of ours are not
+ * alarms: a wearer folding their glasses is the system working. Grouping by
+ * who can act turns the list into triage — reassurance, a developer's own bug,
+ * a known platform limit, or something we should look at.
+ *
+ * The test for a borderline variant is NOT "what caused it" but "does the
+ * advice change". `NotConnected` might be a sequencing bug or a wearer walking
+ * out of range; either way the app must check connection state and handle the
+ * disconnected case, so it classifies cleanly as `Caller`.
+ */
+
+public enum FailureAudience {
+    
+    /**
+     * Nothing is broken. Hardware state or a deliberate user choice — folded
+     * glasses, thermal throttling, a paused camera, a privacy toggle.
+     */
+    case expected
+    /**
+     * The calling app can fix this: request the permission, wait for the
+     * connection, handle the refusal.
+     */
+    case caller
+    /**
+     * A real constraint of the vendor or OS that neither side can code around.
+     */
+    case platform
+    /**
+     * We could not explain it. Native-origin errors carry a code and message
+     * from DAT or the OS that we do not recognise — which makes them exactly
+     * the ones worth surfacing to us rather than burying in an "other" bucket.
+     */
+    case needsALook
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFailureAudience: FfiConverterRustBuffer {
+    typealias SwiftType = FailureAudience
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FailureAudience {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .expected
+        
+        case 2: return .caller
+        
+        case 3: return .platform
+        
+        case 4: return .needsALook
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FailureAudience, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .expected:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .caller:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .platform:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .needsALook:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFailureAudience_lift(_ buf: RustBuffer) throws -> FailureAudience {
+    return try FfiConverterTypeFailureAudience.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFailureAudience_lower(_ value: FailureAudience) -> RustBuffer {
+    return FfiConverterTypeFailureAudience.lower(value)
+}
+
+
+
+extension FailureAudience: Equatable, Hashable {}
 
 
 
@@ -21434,8 +21278,8 @@ fileprivate struct FfiConverterOptionTypePanelGeometry: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeSoundPcm: FfiConverterRustBuffer {
-    typealias SwiftType = SoundPcm?
+fileprivate struct FfiConverterOptionTypeAudioError: FfiConverterRustBuffer {
+    typealias SwiftType = AudioError?
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
@@ -21443,13 +21287,13 @@ fileprivate struct FfiConverterOptionTypeSoundPcm: FfiConverterRustBuffer {
             return
         }
         writeInt(&buf, Int8(1))
-        FfiConverterTypeSoundPcm.write(value, into: &buf)
+        FfiConverterTypeAudioError.write(value, into: &buf)
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
-        case 1: return try FfiConverterTypeSoundPcm.read(from: &buf)
+        case 1: return try FfiConverterTypeAudioError.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -22124,6 +21968,13 @@ public func assistantVoicesForModel(modelId: String) -> [AssistantVoice] {
     )
 })
 }
+public func audioErrorAudience(error: AudioError) -> FailureAudience {
+    return try!  FfiConverterTypeFailureAudience.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_audio_error_audience(
+        FfiConverterTypeAudioError.lower(error),$0
+    )
+})
+}
 /**
  * The stable, payload-free NAME of an audio failure. See `capture_error_code`.
  */
@@ -22221,6 +22072,13 @@ public func capabilityWireId(kind: DeclaredCapability) -> String {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_capability_wire_id(
         FfiConverterTypeDeclaredCapability.lower(kind),$0
+    )
+})
+}
+public func captureErrorAudience(error: CaptureError) -> FailureAudience {
+    return try!  FfiConverterTypeFailureAudience.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_capture_error_audience(
+        FfiConverterTypeCaptureError.lower(error),$0
     )
 })
 }
@@ -23279,6 +23137,32 @@ public func transcriptionGateOpen(privacyRaw: String?, audioEnabledRaw: String?,
 })
 }
 /**
+ * Validate a raw outgoing-audio chunk before it enters the transport —
+ * `glasses.audio.sendAudio`, the bring-your-own-realtime-model path.
+ * `None` means accept.
+ *
+ * Core-owned so both shells reject the same inputs with the same `code`
+ * and the same message. A shell-side copy of this would be two error
+ * vocabularies for one API.
+ *
+ * Only a non-positive `sample_rate` is rejected: it is a programming
+ * error with no sensible fallback, and it is the misconfiguration that
+ * actually happens (an uninitialised field, or a rate read off the wrong
+ * side of a model's config).
+ *
+ * A **dangling odd byte is deliberately NOT an error** — [`scale_pcm16_gain`]
+ * and the named-sound registry already drop it, and one malformed-input
+ * convention per SDK beats two. An empty chunk is a no-op, not a failure,
+ * so a caller can forward whatever its model emits without pre-filtering.
+ */
+public func validateOutgoingAudio(sampleRate: Int32) -> AudioError? {
+    return try!  FfiConverterOptionTypeAudioError.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_validate_outgoing_audio(
+        FfiConverterInt32.lower(sampleRate),$0
+    )
+})
+}
+/**
  * Vendor-routed capability profile — the vendor axis of the capability dial
  * (canonical vendor tokens `"meta"` / `"android_xr"`, decided 2026-07-24).
  * The shells feed the transport's vendor id + the live `display_capable`
@@ -23381,6 +23265,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_assistant_voices_for_model() != 16187) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_audio_error_audience() != 64404) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_audio_error_code() != 42864) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -23406,6 +23293,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_capability_wire_id() != 40381) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_capture_error_audience() != 38837) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_capture_error_code() != 37388) {
@@ -23631,6 +23521,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_transcription_gate_open() != 36844) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_validate_outgoing_audio() != 52871) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_vendor_capability_profile() != 33771) {
@@ -24002,18 +23895,6 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_method_realtimevoicecore_update_instructions() != 19994) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_extentos_core_checksum_method_soundregistry_names() != 23946) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_extentos_core_checksum_method_soundregistry_register() != 9938) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_extentos_core_checksum_method_soundregistry_remove() != 5646) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_extentos_core_checksum_method_soundregistry_resolve() != 30295) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_extentos_core_checksum_method_speechruntracker_reset() != 5811) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -24063,9 +23944,6 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_constructor_realtimevoicecore_new() != 64894) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_extentos_core_checksum_constructor_soundregistry_new() != 1485) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_constructor_speechruntracker_new() != 36083) {

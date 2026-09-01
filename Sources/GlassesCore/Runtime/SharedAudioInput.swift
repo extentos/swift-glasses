@@ -38,6 +38,14 @@ extension AudioInputSubscribing {
     func currentFormat() -> AVAudioFormat? { nil }
 }
 
+/// Raised when the input node cannot currently supply a usable format.
+///
+/// Deliberately a thrown Swift error rather than an ObjC exception escaping
+/// `installTap`: the caller retries, where an exception aborts the process.
+enum AudioInputError: Error {
+    case formatUnavailable
+}
+
 final class SharedAudioInput: AudioInputSubscribing, @unchecked Sendable {
     typealias BufferHandler = (AVAudioPCMBuffer, AVAudioTime) -> Void
 
@@ -132,7 +140,65 @@ final class SharedAudioInput: AudioInputSubscribing, @unchecked Sendable {
         } catch {
             WakeLedger.shared.note("audio: voice processing UNAVAILABLE (\(error))")
         }
+
+        // Stop VPIO ducking the assistant's own voice.
+        //
+        // Enabling voice processing attenuates everything else the app plays.
+        // That is Apple's behaviour, reported on their forums since iOS 6 and
+        // still unfixed, and it is INVISIBLE to the API: the session goes on
+        // reporting the right category, the right route and outputVolume 1.0
+        // while the phone is barely audible. Measured on device before this
+        // line: 0.705 FS arriving from the gateway, 0.660 FS leaving
+        // mainMixerNode, route `Speaker`, volume 1.00 - full level through
+        // every stage we own, and quiet at the speaker. The loss is under
+        // AVAudioEngine, in the VPIO output scope, which is why nothing in the
+        // graph and no session mode could reach it.
+        //
+        // The assistant plays through a SECOND engine, so to VPIO it is "other
+        // audio" and gets ducked against the call. iOS 17 exposes exactly this
+        // knob. Advanced ducking is off because it ducks harder whenever it
+        // believes a participant is talking, which here is the entire point of
+        // the app.
+        //
+        // Verified on an iPhone 12, iOS 26.1: this is the line that made a
+        // phone-only Deal audible.
+        if #available(iOS 17.0, *) {
+            input.voiceProcessingOtherAudioDuckingConfiguration = .init(
+                enableAdvancedDucking: false,
+                duckingLevel: .min
+            )
+        }
         let format = input.outputFormat(forBus: 0)
+
+        // Refuse an unusable format instead of handing it to `installTap`.
+        //
+        // `installTap` does not return an error on a bad format - it raises an
+        // Objective-C exception, which Swift cannot catch, so the process
+        // aborts. That is a crash, not a failure, and it is what killed the app
+        // the moment a Deal started with Ray-Bans connected: the glasses take
+        // the route as an ordinary hands-free device, the input node's format
+        // is not valid yet at the instant the mic is subscribed, and
+        // `AUGraphNodeBaseV3::CreateRecordingTap` throws. Stack:
+        // audioChunksStream -> subscribe -> ensureRunning -> installTapOnBus ->
+        // SIGABRT.
+        //
+        // Throwing here is the RIGHT failure. `SystemAudioBridge`'s subscribe
+        // path already retries at 1 Hz - it was written for the launch/wake
+        // race where session activation throws - so a route still settling gets
+        // another attempt a second later, with a format that has resolved, and
+        // the Deal starts instead of the app dying.
+        //
+        // Tear the half-built engine down first: leaving it attached would let
+        // the retry find a non-nil engine and skip the rebuild.
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            e.stop()
+            WakeLedger.shared.note(String(
+                format: "audio: input format not ready (%.0fHz ch%d) - will retry",
+                format.sampleRate, format.channelCount
+            ))
+            throw AudioInputError.formatUnavailable
+        }
+
         // Tap callback runs on a dedicated audio render thread. Snapshot
         // the consumer list under lock, then dispatch synchronously so the
         // buffer reference stays valid for every handler.

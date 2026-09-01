@@ -79,7 +79,6 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
             installId: nil,
             anonymousDeviceId: AnonymousDeviceId.resolve(),
             libVersion: LibraryVersion.version,
-            // "meta", not the legacy "meta_rayban", which conflated vendor with
             // Resolved from the transport at ENCODE time, mirroring Android.
             // Was the literal "meta_rayban" — a token Android retired on
             // 2026-07-24 and iOS was missed on. The backend had been silently
@@ -294,8 +293,21 @@ public final class DefaultExtentosGlasses: ExtentosGlasses, @unchecked Sendable 
     public var display: any DisplayClient { _display }
     public var usedCapabilities: [DeclaredCapability] { _usedCapabilities }
     public var capabilities: DeviceCapabilitySet {
-        // Profile is core-owned (capability/mod.rs).
-        metaCapabilityProfile(displayCapable: transport.isDisplayCapable())
+        // Profile is core-owned (capability/mod.rs), routed by VENDOR and MODEL.
+        // This used to call metaCapabilityProfile unconditionally, which was
+        // silently wrong the moment a second vendor shipped: a Brilliant Frame
+        // was told it had a speaker it does not have. Android had the mirror-image
+        // bug (vendor-routed, so a Halo reported no hardware at all); one
+        // core-owned answer fixes both. Pre-handshake the transport may not know
+        // its vendor, and the Meta floor is the original behaviour.
+        deviceCapabilityProfile(
+            // Literal rather than an enum: Swift has no `GlassesVendor` type
+            // (Kotlin does). That asymmetry is a separate parity gap, tracked
+            // with the rest of the iOS vendor-axis mirror.
+            vendor: transport.currentVendorId() ?? "meta",
+            modelId: transport.currentDeviceModelId(),
+            displayCapable: transport.isDisplayCapable()
+        )
     }
     public var telemetry: any TelemetryClient { _telemetry }
     public var observability: any ObservabilityClient { _observability }

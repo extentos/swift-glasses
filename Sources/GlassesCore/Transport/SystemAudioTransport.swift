@@ -195,10 +195,15 @@ public final class SystemAudioTransport: GlassesTransport, @unchecked Sendable {
         bridge.audio.flushOutgoingAudio()
     }
 
-    /// Bluetooth HFP is intrinsically narrowband while the mic is open, and that
-    /// is the wire this transport plays over. Asking a realtime provider for
-    /// hi-fi it cannot carry only wastes bandwidth and forces a resample.
-    public nonisolated var outgoingAudioFidelity: OutgoingAudioFidelity { .narrowband }
+    // Fidelity is inherited from the protocol default, which is `.hiFi`.
+    //
+    // This used to declare `.narrowband`, on the reasoning that Bluetooth HFP
+    // is intrinsically narrowband and that is the wire this transport plays
+    // over. RDQ 53 falsified the premise, and hardware settled the rest: with
+    // the default at `.hiFi` and no override here, a bare phone, AirPods and
+    // Ray-Bans all work. A route check was tried in between and removed - it
+    // sent narrowband to every hands-free device, which is exactly the two
+    // symptoms it was meant to prevent.
 }
 
 #endif // os(iOS)

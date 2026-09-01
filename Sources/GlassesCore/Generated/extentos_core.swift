@@ -2748,6 +2748,14 @@ public protocol RealMetaCoreProtocol : AnyObject {
     
     func onAudioRouteChanged(newRoute: AudioRoute, reason: AudioRouteChangeReason) 
     
+    /**
+     * The glasses crossed their low-battery threshold. HTC raises this on the
+     * streaming event channel (`StreamingEvent.BATTERY_LOW`) while a camera or
+     * mic stream runs; other vendors may source it elsewhere. Advisory only —
+     * it does not tear the session down, because the hardware has not.
+     */
+    func onBatteryLow() 
+    
     func onCallStateChanged(state: CallState, phoneNumber: String?) 
     
     /**
@@ -3127,6 +3135,18 @@ open func onAudioRouteChanged(newRoute: AudioRoute, reason: AudioRouteChangeReas
     uniffi_extentos_core_fn_method_realmetacore_on_audio_route_changed(self.uniffiClonePointer(),
         FfiConverterTypeAudioRoute.lower(newRoute),
         FfiConverterTypeAudioRouteChangeReason.lower(reason),$0
+    )
+}
+}
+    
+    /**
+     * The glasses crossed their low-battery threshold. HTC raises this on the
+     * streaming event channel (`StreamingEvent.BATTERY_LOW`) while a camera or
+     * mic stream runs; other vendors may source it elsewhere. Advisory only —
+     * it does not tear the session down, because the hardware has not.
+     */
+open func onBatteryLow() {try! rustCall() {
+    uniffi_extentos_core_fn_method_realmetacore_on_battery_low(self.uniffiClonePointer(),$0
     )
 }
 }
@@ -13966,6 +13986,15 @@ public enum HardwareAlert {
     case thermalWarning(severity: ThermalSeverity
     )
     case hingesClosed
+    /**
+     * The glasses reported their battery is low. Vendor-neutral on purpose:
+     * every vendor's glasses have a battery, and the first vendor to hand us
+     * the signal was HTC (`StreamingEvent.BATTERY_LOW`, raised while a camera
+     * or mic stream is running). Carries no percentage — HTC's signal is a
+     * threshold crossing, not a level, and inventing a number we do not have
+     * would be worse than saying only what the hardware said.
+     */
+    case batteryLow
     case audioRouteChanged(newRoute: AudioRoute, previousRoute: AudioRoute, reason: AudioRouteChangeReason
     )
     case incomingCall(state: CallState, phoneNumber: String?
@@ -13992,16 +14021,18 @@ public struct FfiConverterTypeHardwareAlert: FfiConverterRustBuffer {
         
         case 2: return .hingesClosed
         
-        case 3: return .audioRouteChanged(newRoute: try FfiConverterTypeAudioRoute.read(from: &buf), previousRoute: try FfiConverterTypeAudioRoute.read(from: &buf), reason: try FfiConverterTypeAudioRouteChangeReason.read(from: &buf)
+        case 3: return .batteryLow
+        
+        case 4: return .audioRouteChanged(newRoute: try FfiConverterTypeAudioRoute.read(from: &buf), previousRoute: try FfiConverterTypeAudioRoute.read(from: &buf), reason: try FfiConverterTypeAudioRouteChangeReason.read(from: &buf)
         )
         
-        case 4: return .incomingCall(state: try FfiConverterTypeCallState.read(from: &buf), phoneNumber: try FfiConverterOptionString.read(from: &buf)
+        case 5: return .incomingCall(state: try FfiConverterTypeCallState.read(from: &buf), phoneNumber: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 5: return .appLifecycleChanged(fromState: try FfiConverterTypeAppLifecycleState.read(from: &buf), toState: try FfiConverterTypeAppLifecycleState.read(from: &buf)
+        case 6: return .appLifecycleChanged(fromState: try FfiConverterTypeAppLifecycleState.read(from: &buf), toState: try FfiConverterTypeAppLifecycleState.read(from: &buf)
         )
         
-        case 6: return .phoneNotificationForwarded(packageName: try FfiConverterString.read(from: &buf), title: try FfiConverterOptionString.read(from: &buf), body: try FfiConverterOptionString.read(from: &buf)
+        case 7: return .phoneNotificationForwarded(packageName: try FfiConverterString.read(from: &buf), title: try FfiConverterOptionString.read(from: &buf), body: try FfiConverterOptionString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -14021,27 +14052,31 @@ public struct FfiConverterTypeHardwareAlert: FfiConverterRustBuffer {
             writeInt(&buf, Int32(2))
         
         
-        case let .audioRouteChanged(newRoute,previousRoute,reason):
+        case .batteryLow:
             writeInt(&buf, Int32(3))
+        
+        
+        case let .audioRouteChanged(newRoute,previousRoute,reason):
+            writeInt(&buf, Int32(4))
             FfiConverterTypeAudioRoute.write(newRoute, into: &buf)
             FfiConverterTypeAudioRoute.write(previousRoute, into: &buf)
             FfiConverterTypeAudioRouteChangeReason.write(reason, into: &buf)
             
         
         case let .incomingCall(state,phoneNumber):
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(5))
             FfiConverterTypeCallState.write(state, into: &buf)
             FfiConverterOptionString.write(phoneNumber, into: &buf)
             
         
         case let .appLifecycleChanged(fromState,toState):
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(6))
             FfiConverterTypeAppLifecycleState.write(fromState, into: &buf)
             FfiConverterTypeAppLifecycleState.write(toState, into: &buf)
             
         
         case let .phoneNotificationForwarded(packageName,title,body):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(packageName, into: &buf)
             FfiConverterOptionString.write(title, into: &buf)
             FfiConverterOptionString.write(body, into: &buf)
@@ -17370,6 +17405,18 @@ public enum TransportChosen {
      * see it.
      */
     case brilliantBle
+    /**
+     * HTC VIVE Eagle transport (`:glasses-htc` HtcEagleTransport, vendor
+     * `htc`). Preview — camera, mic, platform STT and TTS come from HTC's
+     * SDK; the assistant's outgoing audio rides the OS Bluetooth route like
+     * [`TransportChosen::SystemAudio`], because HTC's SDK has no audio-out
+     * API at all. Proven against HTC's own simulator, never against
+     * hardware. Two reasons, one of them expiring: Eagle sold only in Taiwan,
+     * Hong Kong, Singapore and Japan until HTC announced US availability from
+     * September 2026, and reaching real glasses additionally needs an app
+     * registration HTC grants off-document. The second is the durable one.
+     */
+    case htcEagle
 }
 
 
@@ -17394,6 +17441,8 @@ public struct FfiConverterTypeTransportChosen: FfiConverterRustBuffer {
         case 5: return .systemAudio
         
         case 6: return .brilliantBle
+        
+        case 7: return .htcEagle
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -17425,6 +17474,10 @@ public struct FfiConverterTypeTransportChosen: FfiConverterRustBuffer {
         
         case .brilliantBle:
             writeInt(&buf, Int32(6))
+        
+        
+        case .htcEagle:
+            writeInt(&buf, Int32(7))
         
         }
     }
@@ -22340,6 +22393,35 @@ public func defaultGreetingDirective() -> String {
     )
 })
 }
+/**
+ * The capability dial for a CONNECTED device — vendor plus the model it
+ * reported. Prefer this over [`vendor_capability_profile`] everywhere a model
+ * id is available, which is every shipping transport after its handshake.
+ *
+ * Why it exists: a capability SET is a property of the DEVICE, not of the
+ * vendor, and Brilliant is the case the flat set was designed for — Halo has a
+ * speaker, Frame does not. A vendor-level answer cannot express that, and both
+ * shells were getting it wrong in opposite directions before this landed:
+ * Android routed by vendor and fell into the unrecognized-vendor arm, so a
+ * Halo reported camera/microphone/speaker all FALSE; iOS called
+ * `meta_capability_profile` unconditionally, so a Frame reported a speaker it
+ * does not have. One core-owned answer removes both.
+ *
+ * `model_id` is the open-vocabulary wire id (`"brilliant_frame"`,
+ * `"vive_eagle"`, …) — `None` before the handshake, which falls back to the
+ * vendor floor. Only models whose set DIFFERS from their vendor floor need an
+ * arm here; the rest are covered by the floor and must not be duplicated.
+ * Must stay aligned with `device-registry/glasses-models.json`.
+ */
+public func deviceCapabilityProfile(vendor: String, modelId: String?, displayCapable: Bool) -> DeviceCapabilitySet {
+    return try!  FfiConverterTypeDeviceCapabilitySet.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_device_capability_profile(
+        FfiConverterString.lower(vendor),
+        FfiConverterOptionString.lower(modelId),
+        FfiConverterBool.lower(displayCapable),$0
+    )
+})
+}
 public func deviceInfoToolDescription() -> String {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_device_info_tool_description($0
@@ -23180,6 +23262,45 @@ public func vendorCapabilityProfile(vendor: String, displayCapable: Bool) -> Dev
 })
 }
 /**
+ * The frame rate a vendor's stream will ACTUALLY run at, given a requested one.
+ *
+ * Most vendors take any rate. HTC does not: their `FrameRate` is a five-rung
+ * enum (5/8/15/24/30), so a request for 6 fps has to become one of those and
+ * SOMETHING has to decide which. Leaving that decision in the shells is how it
+ * went wrong — Android rounded UP to the next rung while the iOS port picked
+ * the NEAREST one, so the same app asking for 6 fps got 8 on one platform and
+ * 5 on the other. Nothing would have caught that: both compiled, both looked
+ * reasonable, and no test compares the two.
+ *
+ * Rounding UP is the policy, because under-delivering frames is the worse
+ * failure: an app that asked for 6 and silently got 5 has a slower stream than
+ * it designed for, with no signal. Above the top rung it clamps.
+ */
+public func vendorFrameRateRung(vendor: String, requested: Int32) -> Int32 {
+    return try!  FfiConverterInt32.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_vendor_frame_rate_rung(
+        FfiConverterString.lower(vendor),
+        FfiConverterInt32.lower(requested),$0
+    )
+})
+}
+/**
+ * A vendor's own ceiling on a single video clip, in seconds, or `None` when it
+ * has none.
+ *
+ * The core clamps rather than the shells so the number lives once. HTC caps a
+ * clip at ten minutes regardless of what is asked for; passing a longer request
+ * through would let the vendor truncate silently instead of us honouring a
+ * bound we can state.
+ */
+public func vendorMaxVideoSeconds(vendor: String) -> Int32? {
+    return try!  FfiConverterOptionInt32.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_vendor_max_video_seconds(
+        FfiConverterString.lower(vendor),$0
+    )
+})
+}
+/**
  * Why a vendor's transport cannot take a STILL, or `None` when it can.
  *
  * Separate from [`vendor_video_stream_refusal`] because Brilliant is exactly the
@@ -23216,6 +23337,26 @@ public func vendorVideoStreamRefusal(vendor: String) -> CaptureError? {
     return try!  FfiConverterOptionTypeCaptureError.lift(try! rustCall() {
     uniffi_extentos_core_fn_func_vendor_video_stream_refusal(
         FfiConverterString.lower(vendor),$0
+    )
+})
+}
+/**
+ * A 44-byte PCM WAV header.
+ *
+ * Pure byte layout with nothing platform-specific in it, and it was written
+ * three times before this: once in Kotlin, once in Swift, and once privately in
+ * `transport/mod.rs` for the simulator's placeholder clip. A WAV header is
+ * exactly the kind of thing that belongs in the core — no OS API, no vendor
+ * SDK, one correct answer.
+ *
+ * 16-bit samples are assumed, which is what every Extentos audio path carries.
+ */
+public func wavHeader(dataSize: UInt32, sampleRate: UInt32, channels: UInt16) -> Data {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_extentos_core_fn_func_wav_header(
+        FfiConverterUInt32.lower(dataSize),
+        FfiConverterUInt32.lower(sampleRate),
+        FfiConverterUInt16.lower(channels),$0
     )
 })
 }
@@ -23350,6 +23491,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_default_greeting_directive() != 21853) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_device_capability_profile() != 61144) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_device_info_tool_description() != 27387) {
@@ -23529,10 +23673,19 @@ private var initializationResult: InitializationResult = {
     if (uniffi_extentos_core_checksum_func_vendor_capability_profile() != 33771) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_extentos_core_checksum_func_vendor_frame_rate_rung() != 39399) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_vendor_max_video_seconds() != 52461) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_extentos_core_checksum_func_vendor_photo_refusal() != 3) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_func_vendor_video_stream_refusal() != 43181) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_func_wav_header() != 16677) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_brilliantcore_capture_photo() != 17441) {
@@ -23743,6 +23896,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realmetacore_on_audio_route_changed() != 4658) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_extentos_core_checksum_method_realmetacore_on_battery_low() != 26080) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_extentos_core_checksum_method_realmetacore_on_call_state_changed() != 60827) {

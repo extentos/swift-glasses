@@ -69,6 +69,17 @@ public extension TransportChosen {
         // because all the protocol lives in the shared core. See
         // Transport/Brilliant/.
         case .brilliantBle: return "BrilliantBle"
+        // HTC VIVE Eagle (vendor htc). Android shipped first (Principle #4) and
+        // is proven against HTC's own simulator. The iOS half is genuinely
+        // buildable — HTC ships an iOS SDK AND an iOS simulator framework — but
+        // it is blocked on a distribution decision rather than on code: their
+        // frameworks are a manual xcframework drop-in, HTC publishes no licence,
+        // and an SPM binaryTarget pointing at a file we cannot ship would break
+        // the package for every existing consumer. See
+        // docs/design/vendors/13-htc-eagle-ios-handoff-2026-08-01.md. The case
+        // is mirrored here so the shared vocabulary stays exhaustive on both
+        // shells and parity CI stays green.
+        case .htcEagle: return "HtcEagle"
         }
     }
 }

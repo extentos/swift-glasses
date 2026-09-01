@@ -24,7 +24,19 @@ import AVFoundation
 ///  - `SystemAudioTransport` uses it standalone — a complete voice runtime on
 ///    any Bluetooth smart glasses, with no vendor credentials and no
 ///    connection flow.
-final class SystemAudioBridge: @unchecked Sendable {
+/// PUBLIC because a vendor transport can live OUTSIDE this module. Android's
+/// `SystemAudioBridge` has been public for exactly this reason — `:glasses-htc`,
+/// `:glasses-xr` and `:glasses-brilliant` are separate Gradle modules that
+/// borrow this audio path rather than duplicating it. iOS kept it internal only
+/// because every transport used to live inside GlassesCore; HTC VIVE Eagle is
+/// the first that cannot (its vendor binary has no licence permitting
+/// redistribution, so it ships as a separate package). Widening this is a
+/// parity fix, not a new seam: the alternative was a second copy of ~577 lines
+/// of audio-session handling, which is the drift this class exists to prevent.
+///
+/// Only the members an out-of-module transport actually needs are public; the
+/// rest stays internal.
+public final class SystemAudioBridge: @unchecked Sendable {
 
     private let lock = NSLock()
     private var core: RealMetaCore?
@@ -48,7 +60,7 @@ final class SystemAudioBridge: @unchecked Sendable {
     private var sttEngine: PlatformSttEngine?
     private var sttHandle: SttEngineHandle?
 
-    init() {
+    public init() {
         // Capture-then-bind — see MetaHardwareBridge.init for the rationale:
         // SharedAudioInput must flip `audioSessionActive` for the R12
         // route-change gating without retaining this bridge.
@@ -71,7 +83,7 @@ final class SystemAudioBridge: @unchecked Sendable {
         }
     }
 
-    func attachCore(_ core: RealMetaCore) {
+    public func attachCore(_ core: RealMetaCore) {
         lock.lock()
         self.core = core
         lock.unlock()
@@ -79,14 +91,14 @@ final class SystemAudioBridge: @unchecked Sendable {
 
     /// Release the outgoing engine, the STT session and the route observer.
     /// Idempotent.
-    func teardown() {
+    public func teardown() {
         stopRouteObserver()
         let handle = takeSttHandle()
         handle?.close()
         releaseOutgoingAudio()
     }
 
-    func startRouteObserver() {
+    public func startRouteObserver() {
         lock.lock()
         let already = audioRouteObserver != nil
         lock.unlock()
@@ -94,7 +106,7 @@ final class SystemAudioBridge: @unchecked Sendable {
         wireAudioRoute()
     }
 
-    func stopRouteObserver() {
+    public func stopRouteObserver() {
         lock.lock()
         let observer = audioRouteObserver
         audioRouteObserver = nil
@@ -260,7 +272,7 @@ final class SystemAudioBridge: @unchecked Sendable {
         return picked
     }
 
-    func earcon(sound: EarconSound, volume: Float) {
+    public func earcon(sound: EarconSound, volume: Float) {
         // No bundled earcon assets in Phase 2A; the existing iOS shell
         // used the system "Tink" sound as a placeholder. Preserved.
         AudioServicesPlaySystemSound(1057) // Tink
@@ -283,7 +295,7 @@ final class SystemAudioBridge: @unchecked Sendable {
     // `audio/pcmu`), the provider decodes mulaw → i16 PCM BEFORE calling
     // — keeps this layer format-agnostic and matches the Android +
     // BrowserSim contract.
-    func playOutgoingAudioChunk(sampleRate: Int32, pcmBytes: Data) {
+    public func playOutgoingAudioChunk(sampleRate: Int32, pcmBytes: Data) {
         if pcmBytes.isEmpty { return }
 
         lock.lock()
@@ -323,7 +335,7 @@ final class SystemAudioBridge: @unchecked Sendable {
     /// end. `AVAudioPlayerNode.stop()` flushes its scheduled buffers;
     /// `play()` re-arms the node so subsequent chunks land on a clean
     /// queue. Mirrors Android `MetaHardwareBridge.flushOutgoingAudio()`.
-    func flushOutgoingAudio() {
+    public func flushOutgoingAudio() {
         lock.lock()
         let player = outgoingAudioPlayer
         let engine = outgoingAudioEngine
@@ -362,6 +374,34 @@ final class SystemAudioBridge: @unchecked Sendable {
         do { try engine.start() } catch { return }
         player.play()
 
+        // Second half of the VPIO attenuation fix; both halves are needed.
+        //
+        // Instantiating the Voice-Processing I/O unit attenuates playback on
+        // the output scope - Apple's, unfixed since iOS 6, and invisible to the
+        // API. Measured on device: 0.7 FS arriving from the gateway, 0.66 FS
+        // leaving mainMixerNode, route `Speaker`, outputVolume 1.00, and barely
+        // audible. Two mechanisms claw it back and they are additive - the
+        // ducking configuration in `SharedAudioInput`, and re-asserting the
+        // category here. Removing either is audibly worse; that was tested by
+        // removing it and listening.
+        //
+        // ONLY on a built-in output. Re-applying the category re-applies
+        // `.defaultToSpeaker`, and doing that after a route has settled turns a
+        // default into an override: it pulled audio off connected Ray-Bans and
+        // back onto the phone. AirPods survived it, which is what made the bug
+        // look like a glasses problem rather than this line.
+        //
+        // After the engine is running, not in `configureAudioSession` - there
+        // it lands before voice processing is enabled, so VPIO comes up
+        // afterwards and re-applies the attenuation to a fix already run.
+        let restore = AVAudioSession.sharedInstance()
+        let port = restore.currentRoute.outputs.first?.portType
+        if port == .builtInSpeaker || port == .builtInReceiver {
+            try? restore.setCategory(
+                restore.category, mode: restore.mode, options: restore.categoryOptions
+            )
+        }
+
         lock.lock()
         outgoingAudioEngine = engine
         outgoingAudioPlayer = player
@@ -384,7 +424,7 @@ final class SystemAudioBridge: @unchecked Sendable {
         engine?.stop()
     }
 
-    func hasMicPermission() -> Bool {
+    public func hasMicPermission() -> Bool {
         let granted = AVAudioSession.sharedInstance().recordPermission == .granted
         return granted
     }

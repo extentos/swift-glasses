@@ -50,9 +50,13 @@ public protocol GlassesTransport: Sendable {
     /// than deriving anything. Mirrors Kotlin `currentDeviceModelId()`.
     func currentDeviceModelId() -> String?
 
-    /// The connected device's VENDOR wire id ("meta", "brilliant", "android_xr"),
-    /// or nil while unknown. Core-owned as `device_vendor`. Mirrors Kotlin
-    /// `currentVendorId()`.
+    /// The connected device's VENDOR wire id ("meta", "brilliant", "android_xr",
+    /// "htc"), or nil while unknown. Core-owned as `device_vendor`. Mirrors
+    /// Kotlin `currentVendorId()`.
+    ///
+    /// Together with the model id above this backs the capability dial's MODEL
+    /// routing — a capability set is a property of the DEVICE, not the vendor
+    /// (Brilliant Frame has a display and no speaker; a Halo has both).
     func currentVendorId() -> String?
 
     func speak(text: String, config: SpeakConfig) async -> ExtentosResult<Void, AudioError>
@@ -180,12 +184,6 @@ public protocol GlassesTransport: Sendable {
 public extension GlassesTransport {
     func handleUrl(_ url: URL) async -> Bool { false }
 
-    /// Default: identity unknown. A transport that has no session to ask says
-    /// so rather than asserting a model, so telemetry records null instead of
-    /// a guess. Transports backed by a core session override both.
-    func currentDeviceModelId() -> String? { nil }
-    func currentVendorId() -> String? { nil }
-
     /// Default: nothing armed. `RealMetaTransport` reports the bridge's
     /// first-armer lock; `BrowserSimTransport` reports its own stream registry;
     /// `LocalSim` inherits this.
@@ -224,7 +222,6 @@ public extension GlassesTransport {
         // default no-op
     }
 
-    /// Default narrowband — the safe choice for real BT HFP/SCO glasses.
     func cancelOutgoingAudio() {
         // default no-op
     }
@@ -245,7 +242,29 @@ public extension GlassesTransport {
 
     func displayPanel() -> PanelGeometry? { nil }
 
-    var outgoingAudioFidelity: OutgoingAudioFidelity { .narrowband }
+    func currentDeviceModelId() -> String? { nil }
+
+    /// Every pre-vendor-axis transport is Meta, so a known model implies it.
+    /// A new vendor's transport MUST override with its own token.
+    func currentVendorId() -> String? {
+        currentDeviceModelId() != nil ? "meta" : nil
+    }
+
+    /// Full band unless a transport says otherwise.
+    ///
+    /// This defaulted to `.narrowband` and called itself "the conservative
+    /// interface default". It is not conservative - it is the degraded one. A
+    /// transport that forgets to declare gets 8 kHz G.711 in BOTH directions
+    /// (`outgoing_hifi` selects the realtime session's input format too),
+    /// silently, with nothing in a log and no error. That is how a phone-only
+    /// app shipped sounding like a phone call.
+    ///
+    /// The safe fallback is the one that works everywhere. A narrow wire is a
+    /// specific fact about a specific transport, so the transports that have
+    /// one declare it; everyone else gets audio that works. Requesting hi-fi on
+    /// a link that cannot carry it costs a resample, which `RealMetaTransport`
+    /// has done on real glasses since the wideband-link finding.
+    var outgoingAudioFidelity: OutgoingAudioFidelity { .hiFi }
 }
 
 /// Fidelity tier of the assistant's outgoing voice a transport's playback path

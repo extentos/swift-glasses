@@ -109,6 +109,17 @@ public enum Extentos {
             if let detect = config.hasBondedMetaDevice, detect() {
                 return (buildRealMetaOrFallback(), .realMeta, .bondedDevices)
             }
+            // Vendors that live OUTSIDE this module get their turn here — the
+            // same position Android's VendorTransports registry occupies in its
+            // Auto chain: after the in-module vendors, before the vendorless
+            // fallbacks. An empty registry makes this line a no-op, so a build
+            // with no vendor package resolves byte-identically to before.
+            //
+            // First case is HTC VIVE Eagle, whose SDK has no licence permitting
+            // redistribution and therefore ships as swift-glasses-htc.
+            if let (transport, chosen) = VendorTransports.resolveFirstEligible(config: config) {
+                return (transport, chosen, .bondedDevices)
+            }
             if config.debug {
                 let deviceInstallId = DeviceInstallStore.resolve()
                 let transport = BrowserSimTransport(

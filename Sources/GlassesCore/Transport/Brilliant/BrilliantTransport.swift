@@ -223,6 +223,22 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
         core.device().map(brilliantModelId).flatMap(panelForDevice)
     }
 
+    /// Identity, so the capability dial can route per MODEL. Without this a
+    /// Frame was told it had a speaker (iOS called the Meta profile
+    /// unconditionally) and, on Android, a Halo was told it had no hardware at
+    /// all. Both are now one core-owned answer keyed on these two values.
+    public nonisolated func currentVendorId() -> String? {
+        core.device() != nil ? "brilliant" : nil
+    }
+
+    public nonisolated func currentDeviceModelId() -> String? {
+        switch core.device() {
+        case .halo: return "brilliant_halo"
+        case .frame: return "brilliant_frame"
+        case .none: return nil
+        }
+    }
+
     public func showDisplay(
         root: DisplayNode,
         onSelect: @escaping @Sendable (String) -> Void,
@@ -468,6 +484,15 @@ public final class BrilliantTransport: GlassesTransport, @unchecked Sendable {
     /// phone's Bluetooth routing reaches a Halo over its custom GATT channel.
     /// Brilliant is the reason that distinction matters — it does not present
     /// as a system headset, so the vendorless audio path cannot see it.
+    /// Pinned explicitly, to the value it already had.
+    ///
+    /// This transport used to inherit `.narrowband` from the protocol default.
+    /// That default is now `.hiFi`, which would have flipped this one's wire
+    /// format as a side effect of fixing a different transport - on hardware
+    /// nobody here can test. Declaring it keeps today's behaviour exactly, and
+    /// makes the choice visible when someone does have the device to try it.
+    public nonisolated var outgoingAudioFidelity: OutgoingAudioFidelity { .narrowband }
+
     public nonisolated func audioChunks(config: AudioChunkConfig) -> AsyncStream<AudioChunk> {
         AsyncStream(bufferingPolicy: .bufferingNewest(64)) { continuation in
             let id = UUID()
